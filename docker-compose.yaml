@@ -1,0 +1,32 @@
+version: '3'
+services:
+  app:
+    # In development, use the following instead of the ECR image.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # image: 583640685860.dkr.ecr.eu-west-2.amazonaws.com/linkedin-reachout:2.0
+    # Use a different port in local development, if port 5000 is taken.
+    ports:
+      - "5000:5000"
+    restart: always
+    # deploy:
+    #   replicas: 2
+    environment:
+      - POSTGRES_URL=postgresql://flavius:aaoranam123@postgresql:5432/digest?schema=public
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:15.3-alpine
+    restart: always
+    environment:
+      - POSTGRES_USER=flavius
+      - POSTGRES_PASSWORD=aaoranam123
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    ports:
+      - '5432:5432'
+
+volumes:
+  postgres:

@@ -1,0 +1,34 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Publication {
+  id   Int    @id @default(autoincrement())
+  name String @unique
+
+  posts Post[]
+}
+
+model Post {
+  id             Int      @id @default(autoincrement())
+  publishedAt    DateTime
+  trxHash        String   @unique
+  title          String
+  contentSnippet String   @db.VarChar(400)
+  fullContent    String
+  cursor         String   @unique
+  publicationId  Int
+  metadata       Json?    @db.Json
+
+  publication Publication @relation(fields: [publicationId], references: [id])
+
+  @@index([publishedAt])
+}
