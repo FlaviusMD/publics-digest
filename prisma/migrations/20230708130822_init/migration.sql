@@ -12,7 +12,7 @@ CREATE TABLE "Post" (
     "publishedAt" TIMESTAMP(3) NOT NULL,
     "trxHash" TEXT NOT NULL,
     "title" TEXT NOT NULL,
-    "contentSnippet" VARCHAR(400) NOT NULL,
+    "contentSnippet" VARCHAR(350) NOT NULL,
     "fullContent" TEXT NOT NULL,
     "cursor" TEXT NOT NULL,
     "publicationId" INTEGER NOT NULL,

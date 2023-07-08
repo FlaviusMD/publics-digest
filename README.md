@@ -13,7 +13,8 @@
 | publishedAt     |    getData()["content"]["timestamp"]    | getData()["publishedAt"] |
 | trxHash     |   graphql_response["data"]["transactions"]["edges"]["node"]["id"]     | ✅ | 
 | title | getData()["content"]["title"] | getData()["title"] |
-| contentSnippet |getData()["content"]["body"] -- Keep 300 characters -- remove \n | getData()["markdown"] -- Keep 300 characters -- remove \n |
+| contentSnippet | getData()["content"]["body"] -- Keep 300 characters -- remove \n | getData()["markdown"] -- Keep 300 characters -- remove \n |
+| fullContent | getData()["content"]["body"] | getData()["markdown"] |
 | cursor     |    graphql_response["data"]["transactions"]["edges"]["cursor"]    | ✅ |
 | metadata | On the GraphQL object. Loop through the return tags in search of "Contributor" | getData()["authors"] |
 

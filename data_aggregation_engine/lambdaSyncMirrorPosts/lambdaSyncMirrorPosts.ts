@@ -22,7 +22,7 @@ export default async function lambdaSyncMirrorPosts(defaultCursor?: string): Pro
 		const latestDBPost = await prisma.post.findFirst({
 			where: {
 				publication: {
-					name: "MirrorXYZ"
+					name: PUBLICATION_NAME
 				}
 			},
 			orderBy: {
@@ -32,14 +32,17 @@ export default async function lambdaSyncMirrorPosts(defaultCursor?: string): Pro
 
 		// If there isn't a DB entry and defaultCursur param has not been given,
 		// stop function execution to avoid infinite loop.
-		if (!latestDBPost) return;
+		if (!latestDBPost) {
+			console.info("Default cursor NOT specified. NO DB entry found. Terminating process gracefully...")
+			return;
+		}
 
 		syncDbUntilCursor = latestDBPost.cursor;
 	} else {
 		syncDbUntilCursor = defaultCursor;
 	}
 
-	console.log(`Latest DB cursor is: ${syncDbUntilCursor}`);
+	console.info(`Latest DB cursor is: ${syncDbUntilCursor}`);
 
 	// We need to get the latest Arweave Data first to have the cursor from which we
 	// start syncing our DB, until the syncDbUntilCursor.
@@ -61,6 +64,7 @@ export default async function lambdaSyncMirrorPosts(defaultCursor?: string): Pro
 		return;
 	}
 
+	// Gather data to be saved in DB
 	let contentInfo = await getProcessedArweaveContent(latestArweaveTrxHash);
 	contentInfo.trxHash = latestArweaveTrxHash;
 	contentInfo.cursor = latestArweaveCursor;
@@ -71,12 +75,13 @@ export default async function lambdaSyncMirrorPosts(defaultCursor?: string): Pro
 		authors: contributor
 	};
 
-	// Even if we can't save the latest arweave post to db, we still want to continue the execution
-	// to try an save the rest of them.
+	// If we can't save the latest arweave post, we stop to ensure avoiding an infinite loop
+	// caused by the unreliable data retrieved from these outside sources we use. 
 	try {
 		await saveToDB(contentInfo);
 	} catch {
-		console.log("Not able to save latest arweave post to DB. Execution continues regardless...")
+		console.log("Not able to save latest arweave post to DB. Terminating the process gracefully...");
+		return;
 	}
 
 	let dbSynced = false;
@@ -92,6 +97,7 @@ export default async function lambdaSyncMirrorPosts(defaultCursor?: string): Pro
 
 			// Update latest Cursor to this transaction
 			latestArweaveCursor = transaction.cursor;
+			console.log(`-------------------- LATEST ARWEAVE CURSOR IS: ${latestArweaveCursor} --------------------`);
 
 			contentInfo = await getProcessedArweaveContent(transaction.node.id);
 			contentInfo.trxHash = transaction.node.id;
@@ -103,12 +109,13 @@ export default async function lambdaSyncMirrorPosts(defaultCursor?: string): Pro
 				authors: contributor
 			};
 
-			// Even if we can't save the latest arweave post to db, we still want to continue the execution
-			// to try an save the rest of them.
 			try {
 				await saveToDB(contentInfo);
 			} catch {
-				console.log("Not able to save latest arweave post to DB. Execution continues regardless...")
+				// Decided to terminate the process to avoid infinite loops.
+				// These loops appear as the data we are retrieving is unreliable.
+				console.log("Not able to save latest arweave post to DB. Terminating the process gracefully...");
+				return;
 			}
 		}
 	}
@@ -206,11 +213,14 @@ async function getProcessedArweaveContent(latestArweaveTrxHash: string): Promise
 	// Get title
 	const title = arweaveContent.content.title;
 
+	// Get processed content body.
+	const processedContentBody = arweaveContent.content.body.replace(/\n\n/g, "\n");
+
 	const contentInfo = {
 		publishedAt: formattedDate,
 		title: title,
 		contentSnippet: processedPostContent,
-		fullContent: arweaveContent.content.body
+		fullContent: processedContentBody
 	};
 
 	return contentInfo;
