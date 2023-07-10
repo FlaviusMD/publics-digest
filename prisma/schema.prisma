@@ -18,17 +18,17 @@ model Publication {
 }
 
 model Post {
-  id             Int      @id @default(autoincrement())
-  publishedAt    DateTime
-  trxHash        String   @unique
-  title          String
-  contentSnippet String   @db.VarChar(350)
-  fullContent    String
-  cursor         String   @unique
-  publicationId  Int
-  metadata       Json?    @db.Json
+  id               Int      @id @default(autoincrement())
+  publishedAt      DateTime
+  trxHash          String   @unique
+  title            String
+  contentSnippet   String   @db.VarChar(350)
+  fullContentS3URL String
+  cursor           String   @unique
+  publicationId    Int
+  metadata         Json?    @db.Json
 
-  publication Publication @relation(fields: [publicationId], references: [id])
+  publication Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
 
   @@index([publishedAt])
 }

@@ -13,7 +13,7 @@ CREATE TABLE "Post" (
     "trxHash" TEXT NOT NULL,
     "title" TEXT NOT NULL,
     "contentSnippet" VARCHAR(350) NOT NULL,
-    "fullContent" TEXT NOT NULL,
+    "fullContentS3URL" TEXT NOT NULL,
     "cursor" TEXT NOT NULL,
     "publicationId" INTEGER NOT NULL,
     "metadata" JSON,
@@ -34,4 +34,4 @@ CREATE UNIQUE INDEX "Post_cursor_key" ON "Post"("cursor");
 CREATE INDEX "Post_publishedAt_idx" ON "Post"("publishedAt");
 
 -- AddForeignKey
-ALTER TABLE "Post" ADD CONSTRAINT "Post_publicationId_fkey" FOREIGN KEY ("publicationId") REFERENCES "Publication"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Post" ADD CONSTRAINT "Post_publicationId_fkey" FOREIGN KEY ("publicationId") REFERENCES "Publication"("id") ON DELETE CASCADE ON UPDATE CASCADE;
