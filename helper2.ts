@@ -1,67 +1,272 @@
-import sanitizeHtml from 'sanitize-html';
+// TODO Make sure cursor for each entry is unique.
+// TODO Make sure that arweaveContent contains the data we need to save our objects to db
+const Arweave = require("arweave");
+import { PrismaClient } from '@prisma/client'
+import axios from "axios"
 
-let dirty = `<p>As the testnet phase of the Router Chain unfolds, our team has been working to optimize the architecture for seamless
-cross-chain workflows. These efforts have resulted in a series of significant updates that have (a) improved our
-throughput, (b) optimized our costs, and © made our offering more developer-friendly. This blog will explore the new
-<a target=\"_blank\" rel=\"noopener noreferrer nofollow ugc\" class=\"dont-break-out af lz\"
-    href=\"https://routerprotocol.com/router-chain-whitepaper.pdf\"><u>Whitepaper</u></a>, which incorporates the
-recent architectural update.</p>
-<h1 style=\"text-align: start\"><strong>The Recent Architectural Update</strong></h1>
-<p style=\"text-align: start\">To understand the new update, let’s briefly recap the Router Chain’s flow; it has three
-major flows — Inbound, Outbound, and CrossTalk, each with a different function call and different modules for
-handling their execution.</p>
-<p style=\"text-align: start\">The Inbound flow handles the transmission of requests from other chains to the Router
-chain, whereas the Outbound flow forwards requests from the Router chain to other chains.</p>
-<p style=\"text-align: start\">Router empowers applications to exert greater control over their business logic through
-middleware contracts positioned between the Inbound and Outbound flow. The third flow, the CrossTalk workflow, is
-enabled by our CrossTalk module, an easy-to-integrate smart contract library that allows developers to build
-cross-chain applications without any custom bridging logic.</p>
-<p style=\"text-align: start\">However, during our internal testnet, we made further improvements and standardized the
-function parameters. We merged the Inbound, Crosstalk, and Outbound into a unified flow on the implementation side.
-This resulted in reduced size of the Gateway contract and much lower gas costs while interacting with it. Now,
-developers can simply pass their request information using a single function. The Router Chain will decode it as
-metadata and data information, transforming the request for the destination chain. This enhanced compatibility
-allows us to add support for new types of chains much more easily.</p>
-<p style=\"text-align: start\">Initially, the integration of Ethermint resulted in an increased block time (from 3
-seconds to 30 seconds). As part of this update, we have made changes in the Ethermint implementation to bring back
-the block time to under 3 seconds. To further optimize our block time, we have also tweaked our re-execution logic
-for pending transactions. Earlier, we used to retry all the pending transactions in a block at the end of that block
-itself, which used to result in higher block times. Now, we maintain the pending transactions in a separate block
-queue, which is executed after every X blocks (where X is a configurable parameter currently set to 300).</p>
-<p style=\"text-align: start\">In addition to the aforementioned changes, we have introduced batching for the
-orchestrator, which has allowed for an increased TPS (transactions per second) for cross-chain requests. Now,
-instead of forwarding every cross-chain request from a chain as it comes, we wait for either 100 requests from that
-chain or Y seconds (whichever happens first), batch all the requests and then forward the batched request to the
-Router chain. Note that Y is a chain-specific configurable parameter currently set to 20.</p>
-<figure float=\"none\" data-type=\"figure\" class=\"img-center\" style=\"max-width: null;\"><img
-    src=\"https://storage.googleapis.com/papyrus_images/ad6c4a813d07398477420534e8feedc1.png\" class=\"image-node
-    embed\">
-<figcaption htmlattributes=\"[object Object]\" class=\"\">Quick Comparison</figcaption>
-</figure>
-<h1 style=\"text-align: start\"><strong>About Router Protocol</strong></h1>
-<p style=\"text-align: start\">Router Protocol is a pioneering cross-chain solution that enables secure and efficient
-communication between blockchain networks. The L1 Router Chain uses Tendermint’s BFT consensus to address
-interoperability challenges while enhancing security and scalability through decentralization. The Chain enables
-cross-chain meta transactions, stateful bridging, transaction batching, and batch atomicity, providing a modular
-framework for building cross-chain dApps in web3. The use cases range from cross-chain NFTs, cross-chain governance,
-and cross-chain stablecoins to cross-chain oracles and cross-chain marketplaces and many more</p>
-<p style=\"text-align: start\">Read our Whitepaper here — <a target=\"_blank\" rel=\"noopener noreferrer nofollow ugc\"
-    class=\"dont-break-out dont-break-out\"
-    href=\"https://routerprotocol.com/router-chain-whitepaper.pdf\"><u>https://routerprotocol.com/router-chain-whitepaper.pdf</u></a>
-</p>
-<p style=\"text-align: start\">Stay tuned for more updates, and keep us close at hand by following us on your preferred
-social media platform!</p>
-<p style=\"text-align: start\"><a target=\"_blank\" rel=\"noopener noreferrer nofollow ugc\" class=\"dont-break-out af
-    lz\" href=\"https://routerprotocol.com/\"><u>Website</u></a> | <a target=\"_blank\" rel=\"noopener noreferrer
-    nofollow ugc\" class=\"dont-break-out af lz\" href=\"https://twitter.com/routerprotocol\"><u>Twitter</u></a> |
-<a target=\"_blank\" rel=\"noopener noreferrer nofollow ugc\" class=\"dont-break-out af lz\"
-    href=\"https://t.me/routerprotocol\"><u>Telegram</u></a> | <a target=\"_blank\" rel=\"noopener noreferrer
-    nofollow ugc\" class=\"dont-break-out af lz\" href=\"https://t.me/router_ann\"><u>Telegram announcements</u></a>
-| <a target=\"_blank\" rel=\"noopener noreferrer nofollow ugc\" class=\"dont-break-out af lz\"
-    href=\"https://discord.gg/yjM2fUUHvN\"><u>Discord</u></a></p>`;
-
-let clean = sanitizeHtml(dirty, {
-    allowedTags: sanitizeHtml.defaults.allowedTags.filter(tag => tag !== 'img'),
+const GRAPHQL_ARWEAVE_ENDPOINT = "https://arweave-search.goldsky.com/graphql";
+const PUBLICATION_NAME = "MirrorXYZ";
+const TAGS = [{ name: "App-Name", values: ["MirrorXYZ"] }];
+const prisma = new PrismaClient();
+const arweave = Arweave.init({
+    host: 'arweave.net',
+    port: 443,
+    protocol: 'https'
 });
 
-console.log(clean);
+
+export default async function lambdaSyncMirrorPosts(defaultCursor?: string): Promise<void> {
+    let syncDbUntilCursor: String;
+
+    if (!defaultCursor) {
+        const latestDBPost = await prisma.post.findFirst({
+            where: {
+                publication: {
+                    name: PUBLICATION_NAME
+                }
+            },
+            orderBy: {
+                publishedAt: 'desc'
+            }
+        });
+
+        // If there isn't a DB entry and defaultCursur param has not been given,
+        // stop function execution to avoid infinite loop.
+        if (!latestDBPost) {
+            console.info("Default cursor NOT specified. NO DB entry found. Terminating process gracefully...")
+            return;
+        }
+
+        syncDbUntilCursor = latestDBPost.cursor;
+    } else {
+        syncDbUntilCursor = defaultCursor;
+    }
+
+    console.info(`Latest DB cursor is: ${syncDbUntilCursor}`);
+
+    // We need to get the latest Arweave Data first to have the cursor from which we
+    // start syncing our DB, until the syncDbUntilCursor.
+    const arweaveGraphQlData: any = await getArweaveGraphQlData();
+
+    let latestArweaveCursor: string = arweaveGraphQlData[0].cursor;
+    const latestArweaveTrxHash: string = arweaveGraphQlData[0].node.id;
+
+    // Make sure we haven't been given an entry that's already in the DB
+    // This avoids an infinite loop.
+    const isEntryAlreadyInDB = await prisma.post.findUnique({
+        where: {
+            trxHash: latestArweaveTrxHash,
+        },
+    });
+
+    if (isEntryAlreadyInDB) {
+        console.log(`DB already up to date for ${PUBLICATION_NAME} publication.`)
+        return;
+    }
+
+    // Gather data to be saved in DB
+    let contentInfo = await getProcessedArweaveContent(latestArweaveTrxHash);
+    contentInfo.trxHash = latestArweaveTrxHash;
+    contentInfo.cursor = latestArweaveCursor;
+    // Get authors for Post metadata
+    let graphQlTagsArray = arweaveGraphQlData[0].node.tags;
+    let contributor = graphQlTagsArray.filter((tag: { name: string }) => tag?.name === 'Contributor')[0]?.value;
+    contentInfo.metadata = {
+        authors: contributor
+    };
+
+    // If we can't save the latest arweave post, we stop to ensure avoiding an infinite loop
+    // caused by the unreliable data retrieved from these outside sources we use. 
+    try {
+        await saveToDB(contentInfo);
+    } catch {
+        console.log("Not able to save latest arweave post to DB. Terminating the process gracefully...");
+        return;
+    }
+
+    let dbSynced = false;
+    while (!dbSynced) {
+        let arweaveTrxBatch = await getArweaveGraphQlData(latestArweaveCursor);
+
+        for (const transaction of arweaveTrxBatch) {
+            // Break loop if we reached the latest DB transaction.
+            if (transaction.cursor === syncDbUntilCursor) {
+                dbSynced = true;
+                break;
+            }
+
+            // Update latest Cursor to this transaction
+            latestArweaveCursor = transaction.cursor;
+            console.log(`-------------------- LATEST ARWEAVE CURSOR IS: ${latestArweaveCursor} --------------------`);
+
+            contentInfo = await getProcessedArweaveContent(transaction.node.id);
+            contentInfo.trxHash = transaction.node.id;
+            contentInfo.cursor = transaction.cursor;
+            // Get authors for Post metadata
+            graphQlTagsArray = transaction.node.tags;
+            contributor = graphQlTagsArray.filter((tag: { name: string }) => tag?.name === 'Contributor')[0]?.value;
+            contentInfo.metadata = {
+                authors: contributor
+            };
+
+            try {
+                await saveToDB(contentInfo);
+            } catch {
+                // Decided to terminate the process to avoid infinite loops.
+                // These loops appear as the data we are retrieving is unreliable.
+                console.log("Not able to save latest arweave post to DB. Terminating the process gracefully...");
+                return;
+            }
+        }
+    }
+
+    console.info(`DB synced to Arweave for ${PUBLICATION_NAME}`);
+}
+
+
+async function getArweaveGraphQlData(latestCursor?: string): Promise<Array<Record<string, any>>> {
+    if (!latestCursor) {
+        const arweaveQuery = `
+		query($tags: [TagFilter!]) {
+			transactions(tags: $tags, first: 1, sort:HEIGHT_DESC) {
+				edges {
+					cursor
+					node {
+						id
+						tags {
+							name
+							value
+						}
+					}
+				}
+			}
+		}`;
+
+        let latestArweaveData: any;
+        try {
+            latestArweaveData = await axios.post(GRAPHQL_ARWEAVE_ENDPOINT, {
+                query: arweaveQuery,
+                variables: {
+                    tags: TAGS
+                }
+            });
+
+            return latestArweaveData.data.data.transactions.edges;
+        } catch (error: any) {
+            console.error(error.response.data);
+            throw error;
+        }
+    } else {
+        const arweaveQuery = `
+		query($tags: [TagFilter!], $cursor: String!) {
+			transactions(tags: $tags, first: 10, after: $cursor, sort:HEIGHT_DESC) {
+				edges {
+					cursor
+					node {
+						id
+						tags {
+							name
+							value
+						}
+					}
+				}
+			}
+		}`
+
+        let latestArweaveData: any;
+        try {
+            latestArweaveData = await axios.post(GRAPHQL_ARWEAVE_ENDPOINT, {
+                query: arweaveQuery,
+                variables: {
+                    tags: TAGS,
+                    cursor: latestCursor
+                }
+            });
+
+            return latestArweaveData.data.data.transactions.edges;
+        } catch (error: any) {
+            console.error(`The hashes of Arweave Posts could NOT be retrieved ${error.response.data}`);
+            throw error;
+        }
+    }
+}
+
+async function getProcessedArweaveContent(latestArweaveTrxHash: string): Promise<Record<string, any>> {
+    let arweaveContent;
+    try {
+        const arweaveContentString = await arweave.transactions.getData(latestArweaveTrxHash, { decode: true, string: true })
+        arweaveContent = JSON.parse(arweaveContentString);
+    } catch (error) {
+        console.error(`Unable to retrieve content data from Arweave SDK for TrxHash: ${latestArweaveTrxHash}: ${error}`)
+        throw error;
+    }
+
+    // Get Published Time
+    const unixTimestamp = parseInt(arweaveContent.content.timestamp); // Unix timestamp in seconds
+    const date = new Date(unixTimestamp * 1000); // Convert Unix timestamp to milliseconds
+    const formattedDate = new Date(date.toUTCString());
+
+    // Get processed content snippet
+    const rawArweavePostContent = arweaveContent.content.body.substring(0, 400);
+    const processedPostContent = rawArweavePostContent.replace(/\n/g, '').substring(0, 300);
+
+    // Get title
+    const title = arweaveContent.content.title;
+
+    // Get processed content body.
+    const processedContentBody = arweaveContent.content.body.replace(/\n\n/g, "\n");
+
+    const contentInfo = {
+        publishedAt: formattedDate,
+        title: title,
+        contentSnippet: processedPostContent,
+        fullContent: processedContentBody
+    };
+
+    return contentInfo;
+}
+
+async function saveToDB(data: Record<string, any>): Promise<void> {
+    let publication = await prisma.publication.findUnique({
+        where: {
+            name: PUBLICATION_NAME
+        }
+    })
+
+    if (!publication) {
+        try {
+            publication = await prisma.publication.create({
+                data: {
+                    name: PUBLICATION_NAME
+                }
+            });
+        } catch (error) {
+            console.error(`Publication ${PUBLICATION_NAME} could NOT be created`);
+            throw error;
+        }
+    }
+
+    try {
+        const saveArweavePost = await prisma.post.create({
+            data: {
+                publishedAt: data.publishedAt,
+                trxHash: data.trxHash,
+                title: data.title,
+                contentSnippet: data.contentSnippet,
+                fullContentS3URL: "",
+                cursor: data.cursor,
+                publicationId: publication.id,
+                metadata: data.metadata
+            }
+        })
+    } catch (error) {
+        console.error(`Unable to save Post (cursor: ${data.cursor}, trxHash: ${data.trxHash}) data to DB: ${error}`);
+        throw error;
+    }
+
+    console.info(`Post ${data.trxHash} has been saved to DB.`);
+}
+
+
+
+lambdaSyncMirrorPosts();

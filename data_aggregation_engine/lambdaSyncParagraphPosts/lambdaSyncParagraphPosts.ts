@@ -1,8 +1,8 @@
 // TODO Make sure cursor for each entry is unique.
 // TODO Make sure that arweaveContent contains the data we need to save our objects to db
 const Arweave = require("arweave");
-import { PrismaClient } from '@prisma/client'
-import axios from "axios"
+import { PrismaClient } from '@prisma/client';
+import axios from "axios";
 import { S3 } from 'aws-sdk';
 import sanitizeHtml from 'sanitize-html';
 
@@ -14,14 +14,16 @@ const arweave = Arweave.init({
     protocol: 'https'
 });
 
-const S3_BUCKET_NAME = "publicsdigestposts" // TODO Save in env variable
-const GRAPHQL_ARWEAVE_ENDPOINT = "https://arweave-search.goldsky.com/graphql"; // TODO Save in env variable to easily switch between official endpoint and goldsky in case of failure.
+// TODO Save in env variable
+const S3_BUCKET_NAME = "publicsdigestposts"
+// TODO Save in env variable to easily switch between official endpoint and goldsky in case of failure.
+const GRAPHQL_ARWEAVE_ENDPOINT = 'https://arweave-search.goldsky.com/graphql';
 const PUBLICATION_NAME = "Paragraph";
 const TAGS = [{ name: "AppName", values: ["Paragraph"] }];
 
 
 export default async function lambdaSyncParagraphPosts(defaultTrx?: string): Promise<void> {
-    let syncDbUntilTrx: String;
+    let syncDbUntilTrx: string;
 
     if (!defaultTrx) {
         const latestDBPost = await prisma.post.findFirst({
@@ -38,7 +40,7 @@ export default async function lambdaSyncParagraphPosts(defaultTrx?: string): Pro
         // If there isn't a DB entry and defaultCursur param has not been given,
         // stop function execution to avoid infinite loop.
         if (!latestDBPost) {
-            console.info("Default cursor NOT specified. NO DB entry found. Terminating process gracefully...")
+            console.info("Default Trx NOT specified. NO DB entry found. Terminating process gracefully...")
             return;
         }
 
