@@ -24,7 +24,7 @@ model Post {
   title            String
   contentSnippet   String   @db.VarChar(350)
   fullContentS3URL String
-  cursor           String   @unique
+  cursor           String
   publicationId    Int
   metadata         Json?    @db.Json
 

@@ -3,10 +3,10 @@
 const Arweave = require("arweave");
 import { PrismaClient } from '@prisma/client'
 import axios from "axios"
+import { S3 } from 'aws-sdk';
+import sanitizeHtml from 'sanitize-html';
 
-const GRAPHQL_ARWEAVE_ENDPOINT = "https://arweave-search.goldsky.com/graphql";
-const PUBLICATION_NAME = "Paragraph";
-const TAGS = [{ name: "AppName", values: ["Paragraph"] }];
+const s3 = new S3();
 const prisma = new PrismaClient();
 const arweave = Arweave.init({
     host: 'arweave.net',
@@ -14,11 +14,16 @@ const arweave = Arweave.init({
     protocol: 'https'
 });
 
+const S3_BUCKET_NAME = "publicsdigestposts" // TODO Save in env variable
+const GRAPHQL_ARWEAVE_ENDPOINT = "https://arweave-search.goldsky.com/graphql"; // TODO Save in env variable to easily switch between official endpoint and goldsky in case of failure.
+const PUBLICATION_NAME = "Paragraph";
+const TAGS = [{ name: "AppName", values: ["Paragraph"] }];
 
-export default async function lambdaSyncParagraphPosts(defaultCursor?: string): Promise<void> {
-    let syncDbUntilCursor: String;
 
-    if (!defaultCursor) {
+export default async function lambdaSyncParagraphPosts(defaultTrx?: string): Promise<void> {
+    let syncDbUntilTrx: String;
+
+    if (!defaultTrx) {
         const latestDBPost = await prisma.post.findFirst({
             where: {
                 publication: {
@@ -37,15 +42,15 @@ export default async function lambdaSyncParagraphPosts(defaultCursor?: string): 
             return;
         }
 
-        syncDbUntilCursor = latestDBPost.cursor;
+        syncDbUntilTrx = latestDBPost.trxHash;
     } else {
-        syncDbUntilCursor = defaultCursor;
+        syncDbUntilTrx = defaultTrx;
     }
 
-    console.info(`Latest DB cursor is: ${syncDbUntilCursor}`);
+    console.info(`Latest DB trxHash is: ${syncDbUntilTrx}`);
 
     // We need to get the latest Arweave Data first to have the cursor from which we
-    // start syncing our DB, until the syncDbUntilCursor.
+    // start syncing our DB, until the syncDbUntilTrx.
     const arweaveGraphQlData: any = await getArweaveGraphQlData();
 
     let latestArweaveCursor: string = arweaveGraphQlData[0].cursor;
@@ -68,6 +73,9 @@ export default async function lambdaSyncParagraphPosts(defaultCursor?: string): 
     let contentInfo = await getProcessedArweaveContent(latestArweaveTrxHash);
     contentInfo.trxHash = latestArweaveTrxHash;
     contentInfo.cursor = latestArweaveCursor;
+    // Save Post static HTML to S3 and get URL. 
+    let postURL = await saveHTMLtoS3(contentInfo.fullContent, contentInfo.trxHash);
+    contentInfo.fullContentS3URL = postURL;
 
     // If we can't save the latest arweave post, we stop to ensure avoiding an infinite loop
     // caused by the unreliable data retrieved from these outside sources we use. 
@@ -84,7 +92,7 @@ export default async function lambdaSyncParagraphPosts(defaultCursor?: string): 
 
         for (const transaction of arweaveTrxBatch) {
             // Break loop if we reached the latest DB transaction.
-            if (transaction.cursor === syncDbUntilCursor) {
+            if (transaction.node.id === syncDbUntilTrx) {
                 dbSynced = true;
                 break;
             }
@@ -96,6 +104,8 @@ export default async function lambdaSyncParagraphPosts(defaultCursor?: string): 
             contentInfo = await getProcessedArweaveContent(transaction.node.id);
             contentInfo.trxHash = transaction.node.id;
             contentInfo.cursor = transaction.cursor;
+            postURL = await saveHTMLtoS3(contentInfo.fullContent, contentInfo.trxHash);
+            contentInfo.fullContentS3URL = postURL;
 
             try {
                 await saveToDB(contentInfo);
@@ -111,6 +121,23 @@ export default async function lambdaSyncParagraphPosts(defaultCursor?: string): 
     console.info(`DB synced to Arweave for ${PUBLICATION_NAME}`);
 }
 
+
+async function saveHTMLtoS3(fullContent: string, trxHash: string): Promise<string> {
+    const params = {
+        Bucket: S3_BUCKET_NAME,
+        Key: trxHash,
+        Body: fullContent,
+    };
+
+    try {
+        await s3.upload(params).promise();
+    } catch (error) {
+        console.error(`Could NOT save Post ${trxHash} to S3: ${error}`);
+        throw error;
+    }
+
+    return `https://${S3_BUCKET_NAME}.s3.amazonaws.com/${trxHash}`;
+}
 
 async function getArweaveGraphQlData(latestCursor?: string): Promise<Array<Record<string, any>>> {
     if (!latestCursor) {
@@ -190,13 +217,14 @@ async function getProcessedArweaveContent(latestArweaveTrxHash: string): Promise
 
     // Get processed content snippet
     const rawArweavePostContent = arweaveContent.markdown.substring(0, 400);
-    const processedPostContent = rawArweavePostContent.replace(/\n/g, '').substring(0, 300);
+    const processedPostContent = rawArweavePostContent.replace(/\n/g, ' ').substring(0, 300);
 
     // Get title
     const title = arweaveContent.title;
 
     // Get processed content body.
-    const processedContentBody = arweaveContent.markdown.replace(/\n\n/g, "\n");
+    // Taking the static HTML from the getData() response and cleaning it.
+    const processedContentBody = processStaticHTML(arweaveContent.staticHtml);
 
     // Get authors for Post metadata
     const authors = arweaveContent.authors;
@@ -212,6 +240,15 @@ async function getProcessedArweaveContent(latestArweaveTrxHash: string): Promise
     };
 
     return contentInfo;
+}
+
+// This version does NOT allow images (img tags are removed)
+function processStaticHTML(staticHTML: string): String {
+    const sanitizedHTML = sanitizeHtml(staticHTML, {
+        allowedTags: sanitizeHtml.defaults.allowedTags.filter(tag => tag !== 'img'),
+    });
+
+    return sanitizedHTML;
 }
 
 async function saveToDB(data: Record<string, any>): Promise<void> {
@@ -235,13 +272,13 @@ async function saveToDB(data: Record<string, any>): Promise<void> {
     }
 
     try {
-        const saveArweavePost = await prisma.post.create({
+        await prisma.post.create({
             data: {
                 publishedAt: data.publishedAt,
                 trxHash: data.trxHash,
                 title: data.title,
                 contentSnippet: data.contentSnippet,
-                fullContent: data.fullContent,
+                fullContentS3URL: data.fullContentS3URL,
                 cursor: data.cursor,
                 publicationId: publication.id,
                 metadata: data.metadata

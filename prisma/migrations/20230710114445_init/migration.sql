@@ -28,9 +28,6 @@ CREATE UNIQUE INDEX "Publication_name_key" ON "Publication"("name");
 CREATE UNIQUE INDEX "Post_trxHash_key" ON "Post"("trxHash");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Post_cursor_key" ON "Post"("cursor");
-
--- CreateIndex
 CREATE INDEX "Post_publishedAt_idx" ON "Post"("publishedAt");
 
 -- AddForeignKey
