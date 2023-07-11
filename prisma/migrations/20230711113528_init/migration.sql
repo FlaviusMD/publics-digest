@@ -1,9 +1,8 @@
 -- CreateTable
 CREATE TABLE "Publication" (
-    "id" SERIAL NOT NULL,
     "name" TEXT NOT NULL,
 
-    CONSTRAINT "Publication_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "Publication_pkey" PRIMARY KEY ("name")
 );
 
 -- CreateTable
@@ -16,7 +15,7 @@ CREATE TABLE "Post" (
     "contentSnippet" VARCHAR(350) NOT NULL,
     "fullContentS3URL" TEXT NOT NULL,
     "cursor" TEXT NOT NULL,
-    "publicationId" INTEGER NOT NULL,
+    "publicationName" TEXT NOT NULL,
     "metadata" JSON,
 
     CONSTRAINT "Post_pkey" PRIMARY KEY ("id")
@@ -35,4 +34,4 @@ CREATE UNIQUE INDEX "Post_trxHash_key" ON "Post"("trxHash");
 CREATE INDEX "Post_publishedAt_idx" ON "Post"("publishedAt");
 
 -- AddForeignKey
-ALTER TABLE "Post" ADD CONSTRAINT "Post_publicationId_fkey" FOREIGN KEY ("publicationId") REFERENCES "Publication"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "Post" ADD CONSTRAINT "Post_publicationName_fkey" FOREIGN KEY ("publicationName") REFERENCES "Publication"("name") ON DELETE CASCADE ON UPDATE CASCADE;

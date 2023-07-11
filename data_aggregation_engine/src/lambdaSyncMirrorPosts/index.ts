@@ -306,7 +306,7 @@ async function saveToDB(data: Record<string, any>): Promise<void> {
 				contentSnippet: data.contentSnippet,
 				fullContentS3URL: data.fullContentS3URL,
 				cursor: data.cursor,
-				publicationId: publication.id,
+				publicationName: publication.name,
 				metadata: data.metadata
 			}
 		})
