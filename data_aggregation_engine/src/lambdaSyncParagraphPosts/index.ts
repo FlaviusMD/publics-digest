@@ -91,6 +91,8 @@ export default async function lambdaSyncParagraphPosts(defaultTrx?: string): Pro
     let dbSynced = false;
     while (!dbSynced) {
         let arweaveTrxBatch = await getArweaveGraphQlData(latestArweaveCursor);
+        console.log(`-------------------- New Arweave Batch Of Transactions --------------------`);
+
 
         for (const transaction of arweaveTrxBatch) {
             // Break loop if we reached the latest DB transaction.
@@ -101,7 +103,6 @@ export default async function lambdaSyncParagraphPosts(defaultTrx?: string): Pro
 
             // Update latest Cursor to this transaction
             latestArweaveCursor = transaction.cursor;
-            console.log(`-------------------- LATEST ARWEAVE CURSOR IS: ${latestArweaveCursor} --------------------`);
 
             contentInfo = await getProcessedArweaveContent(transaction.node.id);
             contentInfo.trxHash = transaction.node.id;

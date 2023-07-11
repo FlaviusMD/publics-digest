@@ -101,6 +101,7 @@ export default async function lambdaSyncMirrorPosts(defaultTrx?: string): Promis
 	let dbSynced = false;
 	while (!dbSynced) {
 		let arweaveTrxBatch = await getArweaveGraphQlData(latestArweaveCursor);
+		console.log(`-------------------- New Arweave Batch Of Transactions --------------------`);
 
 		for (const transaction of arweaveTrxBatch) {
 			// Break loop if we reached the latest DB transaction.
@@ -111,7 +112,6 @@ export default async function lambdaSyncMirrorPosts(defaultTrx?: string): Promis
 
 			// Update latest Cursor to this transaction
 			latestArweaveCursor = transaction.cursor;
-			console.log(`-------------------- LATEST ARWEAVE CURSOR IS: ${latestArweaveCursor} --------------------`);
 
 			contentInfo = await getProcessedArweaveContent(transaction.node.id);
 
@@ -318,5 +318,3 @@ async function saveToDB(data: Record<string, any>): Promise<void> {
 
 	console.info(`Post ${data.trxHash} has been saved to DB.`);
 }
-
-lambdaSyncMirrorPosts("fdsfsfds");
