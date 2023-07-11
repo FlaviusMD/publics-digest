@@ -259,7 +259,8 @@ async function getProcessedArweaveContent(latestArweaveTrxHash: string): Promise
 		publishedAt: formattedDate,
 		title: title,
 		contentSnippet: processedPostContent,
-		fullContent: processedStaticHTML
+		fullContent: processedStaticHTML,
+		trxHash: latestArweaveTrxHash
 	};
 
 	return contentInfo;
@@ -317,3 +318,5 @@ async function saveToDB(data: Record<string, any>): Promise<void> {
 
 	console.info(`Post ${data.trxHash} has been saved to DB.`);
 }
+
+lambdaSyncMirrorPosts("fdsfsfds");
