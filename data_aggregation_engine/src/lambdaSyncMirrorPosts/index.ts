@@ -1,5 +1,4 @@
-// TODO Make sure cursor for each entry is unique.
-// TODO Make sure that arweaveContent contains the data we need to save our objects to db
+// TODO Consider adding rate limiting when gitting the Arweave API
 const Arweave = require("arweave");
 import { PrismaClient } from '@prisma/client';
 import axios from "axios";
