@@ -5,7 +5,7 @@ import { PrismaClient } from '@prisma/client';
 import axios from "axios";
 import { S3 } from 'aws-sdk';
 import sanitizeHtml from 'sanitize-html';
-import { marked } from "marked";
+import { v4 as uuidv4 } from 'uuid';
 
 const s3 = new S3();
 const prisma = new PrismaClient();
@@ -15,12 +15,15 @@ const arweave = Arweave.init({
     protocol: 'https'
 });
 
-const S3_BUCKET_NAME = "publicsdigestposts" // TODO Save in env variable
-const GRAPHQL_ARWEAVE_ENDPOINT = "https://arweave-search.goldsky.com/graphql"; // TODO Save in env variable to easily switch between official endpoint and goldsky in case of failure.
-const PUBLICATION_NAME = "MirrorXYZ";
-const TAGS = [{ name: "App-Name", values: ["MirrorXYZ"] }];
+// TODO Save in env variable
+const S3_BUCKET_NAME = "publicsdigestposts"
+// TODO Save in env variable to easily switch between official endpoint and goldsky in case of failure.
+const GRAPHQL_ARWEAVE_ENDPOINT = 'https://arweave-search.goldsky.com/graphql';
+const PUBLICATION_NAME = "Paragraph";
+const TAGS = [{ name: "AppName", values: ["Paragraph"] }];
 
-export default async function lambdaSyncMirrorPosts(defaultTrx?: string): Promise<void> {
+
+export default async function lambdaSyncParagraphPosts(defaultTrx?: string): Promise<void> {
     let syncDbUntilTrx: string;
 
     if (!defaultTrx) {
@@ -50,7 +53,7 @@ export default async function lambdaSyncMirrorPosts(defaultTrx?: string): Promis
     console.info(`Latest DB trxHash is: ${syncDbUntilTrx}`);
 
     // We need to get the latest Arweave Data first to have the cursor from which we
-    // start syncing our DB, until the syncDbUntilCursor.
+    // start syncing our DB, until the syncDbUntilTrx.
     const arweaveGraphQlData: any = await getArweaveGraphQlData();
 
     let latestArweaveCursor: string = arweaveGraphQlData[0].cursor;
@@ -71,31 +74,19 @@ export default async function lambdaSyncMirrorPosts(defaultTrx?: string): Promis
 
     // Gather data to be saved in DB
     let contentInfo = await getProcessedArweaveContent(latestArweaveTrxHash);
+    contentInfo.trxHash = latestArweaveTrxHash;
+    contentInfo.cursor = latestArweaveCursor;
+    // Save Post static HTML to S3 and get URL. 
+    let postURL = await saveHTMLtoS3(contentInfo.fullContent, contentInfo.trxHash);
+    contentInfo.fullContentS3URL = postURL;
 
-    // If content is NOT encrypted, save it
-    // Otherwise continue normal execution to find and save all non-encrypted posts.
-    if (contentInfo) {
-        // Get authors for Post metadata
-        let graphQlTagsArray = arweaveGraphQlData[0].node.tags;
-        let contributor = graphQlTagsArray.filter((tag: { name: string }) => tag?.name === 'Contributor')[0]?.value;
-        contentInfo.metadata = {
-            authors: contributor
-        };
-
-        console.dir(contentInfo);
-
-        // Save Post static HTML to S3 and get URL. 
-        let postURL = await saveHTMLtoS3(contentInfo.fullContent, contentInfo.trxHash);
-        contentInfo.fullContentS3URL = postURL;
-
-        // If we can't save the latest arweave post, we stop to ensure avoiding an infinite loop
-        // caused by the unreliable data retrieved from these outside sources we use. 
-        try {
-            await saveToDB(contentInfo);
-        } catch {
-            console.log("Not able to save latest arweave post to DB. Terminating the process gracefully...");
-            return;
-        }
+    // If we can't save the latest arweave post, we stop to ensure avoiding an infinite loop
+    // caused by the unreliable data retrieved from these outside sources we use. 
+    try {
+        await saveToDB(contentInfo);
+    } catch {
+        console.log("Not able to save latest arweave post to DB. Terminating the process gracefully...");
+        return;
     }
 
     let dbSynced = false;
@@ -114,19 +105,9 @@ export default async function lambdaSyncMirrorPosts(defaultTrx?: string): Promis
             console.log(`-------------------- LATEST ARWEAVE CURSOR IS: ${latestArweaveCursor} --------------------`);
 
             contentInfo = await getProcessedArweaveContent(transaction.node.id);
-
-            // Skip this transaction if it is encrypted
-            if (!contentInfo) continue;
-
             contentInfo.trxHash = transaction.node.id;
             contentInfo.cursor = transaction.cursor;
-            // Get authors for Post metadata
-            let graphQlTagsArray = transaction.node.tags;
-            let contributor = graphQlTagsArray.filter((tag: { name: string }) => tag?.name === 'Contributor')[0]?.value;
-            contentInfo.metadata = {
-                authors: contributor
-            };
-            let postURL = await saveHTMLtoS3(contentInfo.fullContent, contentInfo.trxHash);
+            postURL = await saveHTMLtoS3(contentInfo.fullContent, contentInfo.trxHash);
             contentInfo.fullContentS3URL = postURL;
 
             try {
@@ -189,7 +170,7 @@ async function getArweaveGraphQlData(latestCursor?: string): Promise<Array<Recor
 
             return latestArweaveData.data.data.transactions.edges;
         } catch (error: any) {
-            console.error(error.response.data);
+            console.error(`The hashes of Arweave Posts could NOT be retrieved ${error.response.data}`);
             throw error;
         }
     } else {
@@ -200,10 +181,6 @@ async function getArweaveGraphQlData(latestCursor?: string): Promise<Array<Recor
 					cursor
 					node {
 						id
-						tags {
-							name
-							value
-						}
 					}
 				}
 			}
@@ -226,7 +203,7 @@ async function getArweaveGraphQlData(latestCursor?: string): Promise<Array<Recor
     }
 }
 
-async function getProcessedArweaveContent(latestArweaveTrxHash: string): Promise<Record<string, any> | null> {
+async function getProcessedArweaveContent(latestArweaveTrxHash: string): Promise<Record<string, any>> {
     let arweaveContent;
     try {
         const arweaveContentString = await arweave.transactions.getData(latestArweaveTrxHash, { decode: true, string: true })
@@ -236,30 +213,33 @@ async function getProcessedArweaveContent(latestArweaveTrxHash: string): Promise
         throw error;
     }
 
-    // If the content is encrypted, skip it.
-    // Encrypted Trx do NOT have spaces.
-    if (!arweaveContent.content.body.includes(" ")) return null;
-
     // Get Published Time
-    const unixTimestamp = parseInt(arweaveContent.content.timestamp); // Unix timestamp in seconds
-    const date = new Date(unixTimestamp * 1000); // Convert Unix timestamp to milliseconds
+    const unixTimestamp = arweaveContent.publishedAt; // Unix timestamp in seconds
+    const date = new Date(unixTimestamp); // Convert Unix timestamp to milliseconds
     const formattedDate = new Date(date.toUTCString());
 
     // Get processed content snippet
-    const rawArweavePostContent = arweaveContent.content.body.substring(0, 400);
-    const processedPostContent = rawArweavePostContent.replace(/\n/g, '').substring(0, 300);
+    const rawArweavePostContent = arweaveContent.markdown.substring(0, 400);
+    const processedPostContent = rawArweavePostContent.replace(/\n/g, ' ').substring(0, 300);
 
     // Get title
-    const title = arweaveContent.content.title;
+    const title = arweaveContent.title;
 
     // Get processed content body.
-    const processedStaticHTML = processStaticHTML(arweaveContent.content.body);
+    // Taking the static HTML from the getData() response and cleaning it.
+    const processedContentBody = processStaticHTML(arweaveContent.staticHtml);
+
+    // Get authors for Post metadata
+    const authors = arweaveContent.authors;
 
     const contentInfo = {
         publishedAt: formattedDate,
         title: title,
         contentSnippet: processedPostContent,
-        fullContent: processedStaticHTML
+        fullContent: processedContentBody,
+        metadata: {
+            authors: authors
+        }
     };
 
     return contentInfo;
@@ -267,13 +247,11 @@ async function getProcessedArweaveContent(latestArweaveTrxHash: string): Promise
 
 // This version does NOT allow images (img tags are removed)
 function processStaticHTML(staticHTML: string): String {
-    const processedContentBody = staticHTML.replace(/\n/g, "<br>");
-    const contentStaticHTMLDirty: string = marked.parse(processedContentBody, { headerIds: false, mangle: false })
-    const contentStaticHTMLClean: string = sanitizeHtml(contentStaticHTMLDirty, {
+    const sanitizedHTML = sanitizeHtml(staticHTML, {
         allowedTags: sanitizeHtml.defaults.allowedTags.filter(tag => tag !== 'img'),
     });
 
-    return contentStaticHTMLClean;
+    return sanitizedHTML;
 }
 
 async function saveToDB(data: Record<string, any>): Promise<void> {
@@ -297,8 +275,9 @@ async function saveToDB(data: Record<string, any>): Promise<void> {
     }
 
     try {
-        const saveArweavePost = await prisma.post.create({
+        await prisma.post.create({
             data: {
+                uuid: uuidv4(),
                 publishedAt: data.publishedAt,
                 trxHash: data.trxHash,
                 title: data.title,
@@ -316,7 +295,3 @@ async function saveToDB(data: Record<string, any>): Promise<void> {
 
     console.info(`Post ${data.trxHash} has been saved to DB.`);
 }
-
-
-
-lambdaSyncMirrorPosts("pbv5dLT9hfm4HCzOSClVUao6kt5C0wUMpZM33XWQRH4");

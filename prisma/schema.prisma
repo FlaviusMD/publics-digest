@@ -19,6 +19,7 @@ model Publication {
 
 model Post {
   id               Int      @id @default(autoincrement())
+  uuid             String   @unique
   publishedAt      DateTime
   trxHash          String   @unique
   title            String

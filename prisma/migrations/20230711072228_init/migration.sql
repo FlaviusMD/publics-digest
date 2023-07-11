@@ -9,6 +9,7 @@ CREATE TABLE "Publication" (
 -- CreateTable
 CREATE TABLE "Post" (
     "id" SERIAL NOT NULL,
+    "uuid" TEXT NOT NULL,
     "publishedAt" TIMESTAMP(3) NOT NULL,
     "trxHash" TEXT NOT NULL,
     "title" TEXT NOT NULL,
@@ -23,6 +24,9 @@ CREATE TABLE "Post" (
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Publication_name_key" ON "Publication"("name");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Post_uuid_key" ON "Post"("uuid");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Post_trxHash_key" ON "Post"("trxHash");

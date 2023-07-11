@@ -6,6 +6,7 @@ import axios from "axios";
 import { S3 } from 'aws-sdk';
 import sanitizeHtml from 'sanitize-html';
 import { marked } from "marked";
+import { v4 as uuidv4 } from "uuid";
 
 const s3 = new S3();
 const prisma = new PrismaClient();
@@ -297,8 +298,9 @@ async function saveToDB(data: Record<string, any>): Promise<void> {
 	}
 
 	try {
-		const saveArweavePost = await prisma.post.create({
+		await prisma.post.create({
 			data: {
+				uuid: uuidv4(),
 				publishedAt: data.publishedAt,
 				trxHash: data.trxHash,
 				title: data.title,
