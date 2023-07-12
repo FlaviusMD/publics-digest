@@ -3,15 +3,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-/*
-    1) ✅ Implement Event Store
-    2) ✅ Use express to listen for requests
-    3) ✅ Unvail the /getPosts?page=<latest_uuid> endpoint
-    4) ✅ Return json response containing the next 50 posts (prisma Postgres) after the given uuid, DESC
-    5) ✅ If no uuid given, return the latest 50 posts, DESC
-    6) ✅ Response contains: [{uuid, title, contentSnippet, publication, publishedAt}], from the prisma object.
-    7) Dockerise it and docker compose it together with Postgres @15.2
-*/
 const express_1 = __importDefault(require("express"));
 const events_1 = require("events");
 const index_1 = require("./listeners/index");
@@ -25,6 +16,10 @@ const startServer = async () => {
     try {
         await (0, index_1.initialiseAllEventListeners)(eventEmitter);
         app.get('/getPosts', (req, res) => {
+            // Set the CORS headers to allow all origins
+            res.header('Access-Control-Allow-Origin', '*');
+            res.header('Access-Control-Allow-Methods', 'GET');
+            res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
             (0, getPostsHandler_1.getPostsHandler)(req, res, prisma);
             const now = new Date().toUTCString();
             eventEmitter.emit('respondedToGetPosts', { time: now, requestInfo: req.query?.latestUUID });
