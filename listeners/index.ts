@@ -1,6 +1,8 @@
 import { EventEmitter } from 'events';
-import { getPostsEndpointServiceListener } from '../services/getPostsEndpointServiceListener';
+import { getPostsEndpointListener } from './getPostsEndpointListener';
+import { unhandledRejectionListener } from './unhandledRejectionListener';
 
 export const initialiseAllEventListeners = async (eventEmitter: EventEmitter) => {
-    getPostsEndpointServiceListener(eventEmitter);
+    getPostsEndpointListener(eventEmitter);
+    unhandledRejectionListener();
 }

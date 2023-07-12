@@ -12,25 +12,25 @@ const PORT = 3000;
 const app = (0, express_1.default)();
 const prisma = new client_1.PrismaClient();
 const eventEmitter = new events_1.EventEmitter();
-const startServer = async () => {
+const initialiseListners = async () => {
     try {
         await (0, index_1.initialiseAllEventListeners)(eventEmitter);
-        app.get('/getPosts', (req, res) => {
-            // Set the CORS headers to allow all origins
-            res.header('Access-Control-Allow-Origin', '*');
-            res.header('Access-Control-Allow-Methods', 'GET');
-            res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-            (0, getPostsHandler_1.getPostsHandler)(req, res, prisma);
-            const now = new Date().toUTCString();
-            eventEmitter.emit('respondedToGetPosts', { time: now, requestInfo: req.query?.latestUUID });
-        });
-        app.listen(PORT, () => {
-            console.log(`Server is running on port ${PORT}`);
-        });
     }
     catch (error) {
         console.error('Failed to initialize services:', error);
         process.exit(1);
     }
 };
-startServer();
+initialiseListners();
+app.get('/getPosts', async (req, res) => {
+    // Set the CORS headers to allow all origins
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    await (0, getPostsHandler_1.getPostsHandler)(req, res, prisma);
+    const now = new Date().toUTCString();
+    eventEmitter.emit('respondedToGetPosts', { time: now, requestInfo: req.query?.latestUUID });
+});
+app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+});
