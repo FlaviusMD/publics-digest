@@ -82,8 +82,6 @@ export default async function lambdaSyncMirrorPosts(defaultTrx?: string): Promis
 			authors: contributor
 		};
 
-		console.dir(contentInfo);
-
 		// Save Post static HTML to S3 and get URL. 
 		let postURL = await saveHTMLtoS3(contentInfo.fullContent, contentInfo.trxHash);
 		contentInfo.fullContentS3URL = postURL;

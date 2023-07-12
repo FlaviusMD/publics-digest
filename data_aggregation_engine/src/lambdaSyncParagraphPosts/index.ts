@@ -73,19 +73,24 @@ export default async function lambdaSyncParagraphPosts(defaultTrx?: string): Pro
 
     // Gather data to be saved in DB
     let contentInfo = await getProcessedArweaveContent(latestArweaveTrxHash);
-    contentInfo.trxHash = latestArweaveTrxHash;
-    contentInfo.cursor = latestArweaveCursor;
-    // Save Post static HTML to S3 and get URL. 
-    let postURL = await saveHTMLtoS3(contentInfo.fullContent, contentInfo.trxHash);
-    contentInfo.fullContentS3URL = postURL;
 
-    // If we can't save the latest arweave post, we stop to ensure avoiding an infinite loop
-    // caused by the unreliable data retrieved from these outside sources we use. 
-    try {
-        await saveToDB(contentInfo);
-    } catch {
-        console.log("Not able to save latest arweave post to DB. Terminating the process gracefully...");
-        return;
+    // If content is NOT encrypted, save it
+    // Otherwise continue normal execution to find and save all non-encrypted posts.
+    if (contentInfo) {
+        contentInfo.trxHash = latestArweaveTrxHash;
+        contentInfo.cursor = latestArweaveCursor;
+        // Save Post static HTML to S3 and get URL. 
+        let postURL = await saveHTMLtoS3(contentInfo.fullContent, contentInfo.trxHash);
+        contentInfo.fullContentS3URL = postURL;
+
+        // If we can't save the latest arweave post, we stop to ensure avoiding an infinite loop
+        // caused by the unreliable data retrieved from these outside sources we use. 
+        try {
+            await saveToDB(contentInfo);
+        } catch {
+            console.log("Not able to save latest arweave post to DB. Terminating the process gracefully...");
+            return;
+        }
     }
 
     let dbSynced = false;
@@ -105,9 +110,13 @@ export default async function lambdaSyncParagraphPosts(defaultTrx?: string): Pro
             latestArweaveCursor = transaction.cursor;
 
             contentInfo = await getProcessedArweaveContent(transaction.node.id);
+
+            // Skip this transaction if it is encrypted
+            if (!contentInfo) continue;
+
             contentInfo.trxHash = transaction.node.id;
             contentInfo.cursor = transaction.cursor;
-            postURL = await saveHTMLtoS3(contentInfo.fullContent, contentInfo.trxHash);
+            let postURL = await saveHTMLtoS3(contentInfo.fullContent, contentInfo.trxHash);
             contentInfo.fullContentS3URL = postURL;
 
             try {
@@ -203,7 +212,7 @@ async function getArweaveGraphQlData(latestCursor?: string): Promise<Array<Recor
     }
 }
 
-async function getProcessedArweaveContent(latestArweaveTrxHash: string): Promise<Record<string, any>> {
+async function getProcessedArweaveContent(latestArweaveTrxHash: string): Promise<Record<string, any> | null> {
     let arweaveContent;
     try {
         const arweaveContentString = await arweave.transactions.getData(latestArweaveTrxHash, { decode: true, string: true })
@@ -212,6 +221,10 @@ async function getProcessedArweaveContent(latestArweaveTrxHash: string): Promise
         console.error(`Unable to retrieve content data from Arweave SDK for TrxHash: ${latestArweaveTrxHash}: ${error}`)
         throw error;
     }
+
+    // If the content is encrypted, skip it.
+    // Encrypted Trx do NOT have spaces.
+    if (!arweaveContent.content.body.includes(" ")) return null;
 
     // Get Published Time
     const unixTimestamp = arweaveContent.publishedAt; // Unix timestamp in seconds
