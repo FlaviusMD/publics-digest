@@ -9,7 +9,7 @@ ENV POSTGRES_PASSWORD=password
 ENV POSTGRES_DB=digest
 ENV DATABASE_URL=postgresql://flavius:password@postgres:5432/digest?schema=public
 
-RUN npm ci --only=production 
+RUN npm ci --omit=dev
 RUN npx prisma generate
 
 EXPOSE 3000

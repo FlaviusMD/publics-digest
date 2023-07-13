@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
+const cors_1 = __importDefault(require("cors"));
 const events_1 = require("events");
 const index_1 = require("./listeners/index");
 const client_1 = require("@prisma/client");
@@ -22,11 +23,8 @@ const initialiseListners = async () => {
     }
 };
 initialiseListners();
+app.use((0, cors_1.default)());
 app.get('/getPosts', async (req, res) => {
-    // Set the CORS headers to allow all origins
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     await (0, getPostsHandler_1.getPostsHandler)(req, res, prisma);
     const now = new Date().toUTCString();
     eventEmitter.emit('respondedToGetPosts', { time: now, requestInfo: req.query?.latestUUID });

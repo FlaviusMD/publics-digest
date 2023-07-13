@@ -5,12 +5,13 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "tsc && cp package.json ./dist && cp -r prisma ./dist && cd ./dist && npm install --omit=dev",
+    "build": "tsc && cp package.json ./dist && cp -r prisma ./dist && cd ./dist && npm i --omit=dev",
     "dev": "npx ts-node index.ts"
   },
   "author": "Flavius Mardare",
   "license": "ISC",
   "devDependencies": {
+    "@types/cors": "^2.8.13",
     "@types/express": "^4.17.17",
     "@types/node": "^20.3.3",
     "ts-node": "^10.9.1",
@@ -21,6 +22,7 @@
     "arweave": "^1.14.0",
     "aws-sdk": "^2.1413.0",
     "axios": "^1.4.0",
+    "cors": "^2.8.5",
     "express": "^4.18.2",
     "prisma": "^4.16.2"
   }

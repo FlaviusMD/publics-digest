@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import { EventEmitter } from 'events';
 import { initialiseAllEventListeners } from './listeners/index';
 import { PrismaClient } from '@prisma/client';
@@ -6,7 +7,6 @@ import { getPostsHandler } from './handlers/getPostsHandler';
 
 const PORT = 3000;
 const app = express();
-
 const prisma = new PrismaClient();
 const eventEmitter = new EventEmitter();
 
@@ -21,12 +21,9 @@ const initialiseListners = async () => {
 
 initialiseListners();
 
-app.get('/getPosts', async (req, res) => {
-    // Set the CORS headers to allow all origins
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+app.use(cors());
 
+app.get('/getPosts', async (req, res) => {
     await getPostsHandler(req, res, prisma);
 
     const now = new Date().toUTCString();
