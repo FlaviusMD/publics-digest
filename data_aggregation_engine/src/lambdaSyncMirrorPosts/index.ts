@@ -6,6 +6,7 @@ import { S3 } from 'aws-sdk';
 import sanitizeHtml from 'sanitize-html';
 import { marked } from "marked";
 import { v4 as uuidv4 } from "uuid";
+import LanguageDetect from 'languagedetect';
 
 const s3 = new S3();
 const prisma = new PrismaClient();
@@ -14,6 +15,7 @@ const arweave = Arweave.init({
 	port: 443,
 	protocol: 'https'
 });
+const lngDetector = new LanguageDetect();
 
 const S3_BUCKET_NAME = "publicsdigestposts" // TODO Save in env variable
 const GRAPHQL_ARWEAVE_ENDPOINT = "https://arweave-search.goldsky.com/graphql"; // TODO Save in env variable to easily switch between official endpoint and goldsky in case of failure.
@@ -21,6 +23,26 @@ const PUBLICATION_NAME = "MirrorXYZ";
 const TAGS = [{ name: "App-Name", values: ["MirrorXYZ"] }];
 
 export default async function lambdaSyncMirrorPosts(defaultTrx?: string): Promise<void> {
+	// Create Publication if it doesn't exist.
+	let publication = await prisma.publication.findUnique({
+		where: {
+			name: PUBLICATION_NAME
+		}
+	})
+
+	if (!publication) {
+		try {
+			publication = await prisma.publication.create({
+				data: {
+					name: PUBLICATION_NAME
+				}
+			});
+		} catch (error) {
+			console.error(`Publication ${PUBLICATION_NAME} could NOT be created`);
+			throw error;
+		}
+	}
+
 	let syncDbUntilTrx: string;
 
 	if (!defaultTrx) {
@@ -72,8 +94,7 @@ export default async function lambdaSyncMirrorPosts(defaultTrx?: string): Promis
 	// Gather data to be saved in DB
 	let contentInfo = await getProcessedArweaveContent(latestArweaveTrxHash);
 
-	// If content is NOT encrypted, save it
-	// Otherwise continue normal execution to find and save all non-encrypted posts.
+	// If content passes our minimum crypteria to be displayed, save it.
 	if (contentInfo) {
 		// Get authors for Post metadata
 		let graphQlTagsArray = arweaveGraphQlData[0].node.tags;
@@ -81,6 +102,8 @@ export default async function lambdaSyncMirrorPosts(defaultTrx?: string): Promis
 		contentInfo.metadata = {
 			authors: contributor
 		};
+		contentInfo.trxHash = latestArweaveTrxHash;
+		contentInfo.cursor = latestArweaveCursor;
 
 		// Save Post static HTML to S3 and get URL. 
 		let postURL = await saveHTMLtoS3(contentInfo.fullContent, contentInfo.trxHash);
@@ -90,8 +113,8 @@ export default async function lambdaSyncMirrorPosts(defaultTrx?: string): Promis
 		// caused by the unreliable data retrieved from these outside sources we use. 
 		try {
 			await saveToDB(contentInfo);
-		} catch {
-			console.log("Not able to save latest arweave post to DB. Terminating the process gracefully...");
+		} catch (error) {
+			console.log(`Not able to save latest arweave post to DB. Terminating the process gracefully... ERROR: ${error}`);
 			return;
 		}
 	}
@@ -113,7 +136,7 @@ export default async function lambdaSyncMirrorPosts(defaultTrx?: string): Promis
 
 			contentInfo = await getProcessedArweaveContent(transaction.node.id);
 
-			// Skip this transaction if it is encrypted
+			// Skip this transaction if it doesn't meet out minimum criteria.
 			if (!contentInfo) continue;
 
 			contentInfo.trxHash = transaction.node.id;
@@ -236,27 +259,43 @@ async function getProcessedArweaveContent(latestArweaveTrxHash: string): Promise
 
 	// If the content is encrypted, skip it.
 	// Encrypted Trx do NOT have spaces.
-	if (!arweaveContent.content.body.includes(" ")) return null;
+	if (!arweaveContent.content.body.includes(" ")) {
+		console.info(`Trx ${latestArweaveTrxHash} NOT saved because it is encrypted`);
+		return null;
+	}
+	// If content is NOT english, skip it.
+	const mostLikelyLng = lngDetector.detect(arweaveContent.content.body.substring(0, 5000), 1)[0][0];
+	if (mostLikelyLng !== 'english') {
+		console.info(`Trx ${latestArweaveTrxHash} NOT saved because language is NOT english`);
+		return null;
+	}
+	// If content is NOT longer than 300 chars, it's not worth displaying.
+	if (arweaveContent.content.body.length < 300) {
+		console.info(`Trx ${latestArweaveTrxHash} NOT saved because content is shorter than 300 chars`);
+		return null;
+	}
 
 	// Get Published Time
 	const unixTimestamp = parseInt(arweaveContent.content.timestamp); // Unix timestamp in seconds
 	const date = new Date(unixTimestamp * 1000); // Convert Unix timestamp to milliseconds
 	const formattedDate = new Date(date.toUTCString());
 
-	// Get processed content snippet
-	const rawArweavePostContent = arweaveContent.content.body.substring(0, 400);
-	const processedPostContent = rawArweavePostContent.replace(/\n/g, '').substring(0, 300);
+	// Turn Dirty Markdown into Dirty HTML
+	const dirtyHTML = markdownToHTML(arweaveContent.content.body);
+	// const contentSnippet = processedPostContent.substring(0, 600);
+	const htmlForContentSnippet = processStaticHTML(dirtyHTML.substring(0, 5000), true);
+	const contentSnippet = htmlForContentSnippet.replace(/<[^>]+>/g, '').substring(0, 600);
 
 	// Get title
 	const title = arweaveContent.content.title;
 
 	// Get processed content body.
-	const processedStaticHTML = processStaticHTML(arweaveContent.content.body);
+	const processedStaticHTML = processStaticHTML(dirtyHTML);
 
 	const contentInfo = {
 		publishedAt: formattedDate,
 		title: title,
-		contentSnippet: processedPostContent,
+		contentSnippet: contentSnippet,
 		fullContent: processedStaticHTML,
 		trxHash: latestArweaveTrxHash
 	};
@@ -264,51 +303,78 @@ async function getProcessedArweaveContent(latestArweaveTrxHash: string): Promise
 	return contentInfo;
 }
 
-// This version does NOT allow images (img tags are removed)
-function processStaticHTML(staticHTML: string): String {
-	const processedContentBody = staticHTML.replace(/\n/g, "<br>");
-	const contentStaticHTMLDirty: string = marked.parse(processedContentBody, { headerIds: false, mangle: false })
-	const contentStaticHTMLClean: string = sanitizeHtml(contentStaticHTMLDirty, {
-		allowedTags: sanitizeHtml.defaults.allowedTags.filter(tag => tag !== 'img'),
-	});
+function markdownToHTML(markdownText: string): string {
+	// const processedMarkdown = markdownText.replace(/\n/g, ' ');
 
-	return contentStaticHTMLClean;
+	// return marked.parse(processedMarkdown, { headerIds: false, mangle: false });
+
+	return marked.parse(markdownText);
+}
+
+function processStaticHTML(staticHTML: string, removeLinks: boolean = false): string {
+	let sanitizedHTML: string;
+
+	// sanitize and remove links
+	if (removeLinks) {
+		sanitizedHTML = sanitizeHtml(staticHTML, {
+			allowedTags: sanitizeHtml.defaults.allowedTags.filter(tag => tag !== 'link' && tag !== 'a')
+		});
+	} else {
+		// general sanitization
+		sanitizedHTML = sanitizeHtml(staticHTML, {
+			allowedTags: sanitizeHtml.defaults.allowedTags.concat(['img', 'a']),
+			allowedAttributes: {
+				'a': ['href', 'name', 'target'],
+				'img': ['src', 'alt']
+			}
+		});
+	}
+
+	return sanitizedHTML;
 }
 
 async function saveToDB(data: Record<string, any>): Promise<void> {
-	let publication = await prisma.publication.findUnique({
-		where: {
-			name: PUBLICATION_NAME
-		}
-	})
-
-	if (!publication) {
-		try {
-			publication = await prisma.publication.create({
-				data: {
-					name: PUBLICATION_NAME
-				}
-			});
-		} catch (error) {
-			console.error(`Publication ${PUBLICATION_NAME} could NOT be created`);
-			throw error;
-		}
-	}
+	const twelveHoursSincePosted = new Date((new Date(data.publishedAt.getTime() - 12 * 60 * 60 * 1000)).toUTCString());
 
 	try {
-		await prisma.post.create({
-			data: {
-				uuid: uuidv4(),
-				publishedAt: data.publishedAt,
-				trxHash: data.trxHash,
+		const post = await prisma.post.findFirst({
+			where: {
 				title: data.title,
-				contentSnippet: data.contentSnippet,
-				fullContentS3URL: data.fullContentS3URL,
-				cursor: data.cursor,
-				publicationName: publication.name,
-				metadata: data.metadata
+				publishedAt: {
+					gte: twelveHoursSincePosted
+				}
 			}
-		})
+		});
+
+		if (post) {
+			await prisma.post.update({
+				where: {
+					uuid: post.uuid
+				},
+				data: {
+					publishedAt: data.publishedAt,
+					trxHash: data.trxHash,
+					contentSnippet: data.contentSnippet,
+					fullContentS3URL: data.fullContentS3URL,
+					cursor: data.cursor,
+					metadata: data.metadata
+				}
+			});
+		} else {
+			await prisma.post.create({
+				data: {
+					uuid: uuidv4(),
+					publishedAt: data.publishedAt,
+					trxHash: data.trxHash,
+					title: data.title,
+					contentSnippet: data.contentSnippet,
+					fullContentS3URL: data.fullContentS3URL,
+					cursor: data.cursor,
+					publicationName: PUBLICATION_NAME,
+					metadata: data.metadata
+				}
+			})
+		}
 	} catch (error) {
 		console.error(`Unable to save Post (cursor: ${data.cursor}, trxHash: ${data.trxHash}) data to DB: ${error}`);
 		throw error;
@@ -316,3 +382,5 @@ async function saveToDB(data: Record<string, any>): Promise<void> {
 
 	console.info(`Post ${data.trxHash} has been saved to DB.`);
 }
+
+lambdaSyncMirrorPosts("f8ugbDwMGU1hljL4hQ2iokSwGEUpOIXmnC_HXnAPzYs");
