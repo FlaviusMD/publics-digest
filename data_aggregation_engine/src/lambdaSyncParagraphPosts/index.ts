@@ -339,7 +339,12 @@ function processStaticHTML(staticHTML: string, removeLinks: boolean = false): St
         });
     } else {
         // general sanitization
-        sanitizedHTML = sanitizeHtml(staticHTML);
+        sanitizedHTML = sanitizeHtml(staticHTML, {
+            allowedTags: sanitizeHtml.defaults.allowedTags.concat(['img']),
+            allowedAttributes: {
+                'img': ['src', 'alt']
+            }
+        });
     }
 
     return sanitizedHTML;
