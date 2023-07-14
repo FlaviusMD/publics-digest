@@ -1,4 +1,11 @@
 // TODO Consider adding rate limiting when gitting the Arweave API
+// Right now, we are not deleting all updated contents from S3. We are simply adding new entries. In saveDataToDB() function, delete all entry to S3.
+// Consider transforming metadata DB field into authors field and using that to search for DB saved content that has been updated in Arweave in the mean time.
+// Right now, we are updating content with the same title and previous 12 hours time. Not ideal as lots of posts can have the same title.
+
+/**
+ * Should be ran every 3 mins as it has to perform loads of computations.
+ */
 const Arweave = require("arweave");
 import { PrismaClient } from '@prisma/client';
 import axios from "axios";
@@ -20,9 +27,34 @@ const S3_BUCKET_NAME = "publicsdigestposts"
 const GRAPHQL_ARWEAVE_ENDPOINT = 'https://arweave-search.goldsky.com/graphql';
 const PUBLICATION_NAME = "Paragraph";
 const TAGS = [{ name: "AppName", values: ["Paragraph"] }];
+const MOST_COMMON_ENGLISH_WORDS = new Set([
+    'the', 'be', 'of', 'and', 'a', 'to', 'in', 'he', 'have', 'it', 'that', 'for', 'they', 'I', 'with', 'as', 'not', 'on', 'she', 'at', 'by', 'this', 'we', 'you', 'do', 'but', 'from', 'or', 'which', 'one', 'would', 'all', 'will', 'there', 'say', 'who', 'make', 'when', 'can', 'more', 'if', 'no', 'man', 'out', 'other', 'so', 'what', 'time', 'up', 'go', 'about', 'than', 'into', 'could', 'state', 'only', 'new', 'year', 'some', 'take', 'come', 'these', 'know', 'see', 'use', 'get', 'like', 'then', 'first', 'any', 'work', 'now', 'may', 'such', 'give', 'over', 'think', 'most', 'even', 'find', 'day', 'also', 'after', 'way', 'many', 'must', 'look', 'before', 'great', 'back', 'through', 'long', 'where', 'much', 'should', 'well', 'people', 'down', 'own', 'just', 'because', 'good', 'each', 'those', 'feel', 'seem', 'how', 'high', 'too', 'place', 'little', 'world', 'very', 'still', 'nation', 'hand', 'old', 'life', 'tell', 'write', 'become', 'here', 'show', 'house', 'both', 'between', 'need', 'mean', 'call', 'develop', 'under', 'last', 'right', 'move', 'thing', 'general', 'school', 'never', 'same', 'another', 'begin', 'while', 'number', 'part', 'turn', 'real', 'leave', 'might', 'want', 'point', 'form', 'off', 'child', 'few', 'small', 'since', 'against', 'ask', 'late', 'home', 'interest', 'large', 'person', 'end', 'open', 'public', 'follow', 'during', 'present', 'without', 'again', 'hold', 'govern', 'around', 'possible', 'head', 'consider', 'word', 'program', 'problem', 'however', 'lead', 'system', 'set', 'order', 'eye', 'plan', 'run', 'keep', 'face', 'fact', 'group', 'play', 'stand', 'increase', 'early', 'course', 'change', 'help', 'line'
+]);
+const MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS = 20;
 
 
 export default async function lambdaSyncParagraphPosts(defaultTrx?: string): Promise<void> {
+    // Create Publication if it doesn't exist.
+    let publication = await prisma.publication.findUnique({
+        where: {
+            name: PUBLICATION_NAME
+        }
+    })
+
+    if (!publication) {
+        try {
+            publication = await prisma.publication.create({
+                data: {
+                    name: PUBLICATION_NAME
+                }
+            });
+        } catch (error) {
+            console.error(`Publication ${PUBLICATION_NAME} could NOT be created`);
+            throw error;
+        }
+    }
+
+
     let syncDbUntilTrx: string;
 
     if (!defaultTrx) {
@@ -74,7 +106,7 @@ export default async function lambdaSyncParagraphPosts(defaultTrx?: string): Pro
     // Gather data to be saved in DB
     let contentInfo = await getProcessedArweaveContent(latestArweaveTrxHash);
 
-    // If content is NOT encrypted, save it
+    // If content passes our minimum crypteria to be displayed, save it.
     // Otherwise continue normal execution to find and save all non-encrypted posts.
     if (contentInfo) {
         contentInfo.trxHash = latestArweaveTrxHash;
@@ -111,7 +143,7 @@ export default async function lambdaSyncParagraphPosts(defaultTrx?: string): Pro
 
             contentInfo = await getProcessedArweaveContent(transaction.node.id);
 
-            // Skip this transaction if it is encrypted
+            // Skip this transaction if it doesn't meet out minimum criteria.
             if (!contentInfo) continue;
 
             contentInfo.trxHash = transaction.node.id;
@@ -222,9 +254,21 @@ async function getProcessedArweaveContent(latestArweaveTrxHash: string): Promise
         throw error;
     }
 
-    // If the content is encrypted, skip it.
-    // Encrypted Trx do NOT have spaces.
-    if (!arweaveContent.content.body.includes(" ")) return null;
+    // If the content is encrypted, skip it. Encrypted Trx do NOT have spaces.
+    if (!arweaveContent.markdown.includes(" ")) {
+        console.info(`Trx ${latestArweaveTrxHash} NOT saved because it is encrypted`);
+        return null;
+    }
+    // If content is NOT english, skip it.
+    if (!checkEnglishLanguage(arweaveContent.markdown, MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS)) {
+        console.info(`Trx ${latestArweaveTrxHash} NOT saved because language is NOT english`);
+        return null;
+    }
+    // If content is NOT longer than 300 chars, it's not worth displaying.
+    if (arweaveContent.markdown.length < 300) {
+        console.info(`Trx ${latestArweaveTrxHash} NOT saved because content is shorter than 300 chars`);
+        return null;
+    }
 
     // Get Published Time
     const unixTimestamp = arweaveContent.publishedAt; // Unix timestamp in seconds
@@ -232,8 +276,8 @@ async function getProcessedArweaveContent(latestArweaveTrxHash: string): Promise
     const formattedDate = new Date(date.toUTCString());
 
     // Get processed content snippet
-    const rawArweavePostContent = arweaveContent.markdown.substring(0, 400);
-    const processedPostContent = rawArweavePostContent.replace(/\n/g, ' ').substring(0, 300);
+    const rawArweavePostContent = processStaticHTML(arweaveContent.staticHtml.substring(0, 5000), true);
+    const processedPostContent = rawArweavePostContent.replace(/<[^>]+>/g, '').substring(0, 600);
 
     // Get title
     const title = arweaveContent.title;
@@ -258,49 +302,91 @@ async function getProcessedArweaveContent(latestArweaveTrxHash: string): Promise
     return contentInfo;
 }
 
-// This version does NOT allow images (img tags are removed)
-function processStaticHTML(staticHTML: string): String {
-    const sanitizedHTML = sanitizeHtml(staticHTML, {
-        allowedTags: sanitizeHtml.defaults.allowedTags.filter(tag => tag !== 'img'),
-    });
+/**
+ * Checks if a given text contains a minimum number of UNIQUE English words.
+ * @param textToCheck The text to check for English language.
+ * @param minimum_number_qunique_english_words The minimum number of unique English words required in the text.
+ * @returns A boolean indicating whether the text contains the minimum number of unique English words.
+ */
+function checkEnglishLanguage(textToCheck: string, minimum_number_qunique_english_words: number): boolean {
+    let counter = 0;
+    const wordsInText = textToCheck.split(/\W+/);
+    // const mostCommonEnglishWordsReplicated: Set<String> = MOST_COMMON_ENGLISH_WORDS;
+
+    for (const word of wordsInText) {
+        if (counter === minimum_number_qunique_english_words) return true;
+
+        if (MOST_COMMON_ENGLISH_WORDS.has(word.toLowerCase())) {
+            counter++;
+        }
+
+        // if (mostCommonEnglishWordsReplicated.has(word.toLowerCase())) {
+        //     mostCommonEnglishWordsReplicated.delete(word.toLowerCase());
+        //     counter++;
+        // }
+    }
+
+    return false;
+}
+
+function processStaticHTML(staticHTML: string, removeLinks: boolean = false): String {
+    let sanitizedHTML: string;
+
+    // sanitize and remove links
+    if (removeLinks) {
+        sanitizedHTML = sanitizeHtml(staticHTML, {
+            allowedTags: sanitizeHtml.defaults.allowedTags.filter(tag => tag !== 'link' && tag !== 'a')
+        });
+    } else {
+        // general sanitization
+        sanitizedHTML = sanitizeHtml(staticHTML);
+    }
 
     return sanitizedHTML;
 }
 
 async function saveToDB(data: Record<string, any>): Promise<void> {
-    let publication = await prisma.publication.findUnique({
-        where: {
-            name: PUBLICATION_NAME
-        }
-    })
-
-    if (!publication) {
-        try {
-            publication = await prisma.publication.create({
-                data: {
-                    name: PUBLICATION_NAME
-                }
-            });
-        } catch (error) {
-            console.error(`Publication ${PUBLICATION_NAME} could NOT be created`);
-            throw error;
-        }
-    }
+    const twelveHoursSincePosted = new Date((new Date(data.publishedAt.getTime() - 12 * 60 * 60 * 1000)).toUTCString());
 
     try {
-        await prisma.post.create({
-            data: {
-                uuid: uuidv4(),
-                publishedAt: data.publishedAt,
-                trxHash: data.trxHash,
+        const post = await prisma.post.findFirst({
+            where: {
                 title: data.title,
-                contentSnippet: data.contentSnippet,
-                fullContentS3URL: data.fullContentS3URL,
-                cursor: data.cursor,
-                publicationName: publication.name,
-                metadata: data.metadata
+                publishedAt: {
+                    gte: twelveHoursSincePosted
+                }
             }
-        })
+        });
+
+        if (post) {
+            await prisma.post.update({
+                where: {
+                    uuid: post.uuid
+                },
+                data: {
+                    publishedAt: data.publishedAt,
+                    trxHash: data.trxHash,
+                    contentSnippet: data.contentSnippet,
+                    fullContentS3URL: data.fullContentS3URL,
+                    cursor: data.cursor,
+                    metadata: data.metadata
+                }
+            });
+        } else {
+            await prisma.post.create({
+                data: {
+                    uuid: uuidv4(),
+                    publishedAt: data.publishedAt,
+                    trxHash: data.trxHash,
+                    title: data.title,
+                    contentSnippet: data.contentSnippet,
+                    fullContentS3URL: data.fullContentS3URL,
+                    cursor: data.cursor,
+                    publicationName: PUBLICATION_NAME,
+                    metadata: data.metadata
+                }
+            })
+        }
     } catch (error) {
         console.error(`Unable to save Post (cursor: ${data.cursor}, trxHash: ${data.trxHash}) data to DB: ${error}`);
         throw error;
@@ -308,3 +394,5 @@ async function saveToDB(data: Record<string, any>): Promise<void> {
 
     console.info(`Post ${data.trxHash} has been saved to DB.`);
 }
+
+lambdaSyncParagraphPosts("OvlTr1tcbDXptn3W842tq1e1iMOh1_Md7KfQXXNlnfM");
