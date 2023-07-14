@@ -119,8 +119,8 @@ export default async function lambdaSyncParagraphPosts(defaultTrx?: string): Pro
         // caused by the unreliable data retrieved from these outside sources we use. 
         try {
             await saveToDB(contentInfo);
-        } catch {
-            console.log("Not able to save latest arweave post to DB. Terminating the process gracefully...");
+        } catch (error) {
+            console.log(`Not able to save latest arweave post to DB. Terminating the process gracefully... ERROR ${error}`);
             return;
         }
     }
@@ -153,10 +153,10 @@ export default async function lambdaSyncParagraphPosts(defaultTrx?: string): Pro
 
             try {
                 await saveToDB(contentInfo);
-            } catch {
+            } catch (error) {
                 // Decided to terminate the process to avoid infinite loops.
                 // These loops appear as the data we are retrieving is unreliable.
-                console.log("Not able to save latest arweave post to DB. Terminating the process gracefully...");
+                console.log(`Not able to save latest arweave post to DB. Terminating the process gracefully... ERROR: ${error}`);
                 return;
             }
         }
@@ -277,7 +277,7 @@ async function getProcessedArweaveContent(latestArweaveTrxHash: string): Promise
 
     // Get processed content snippet
     const rawArweavePostContent = processStaticHTML(arweaveContent.staticHtml.substring(0, 5000), true);
-    const processedPostContent = rawArweavePostContent.replace(/<[^>]+>/g, '').substring(0, 600);
+    const processedPostContent = rawArweavePostContent.replace(/<[^>]+>/g, '').substring(0, 597) + '...';
 
     // Get title
     const title = arweaveContent.title;
@@ -340,8 +340,9 @@ function processStaticHTML(staticHTML: string, removeLinks: boolean = false): St
     } else {
         // general sanitization
         sanitizedHTML = sanitizeHtml(staticHTML, {
-            allowedTags: sanitizeHtml.defaults.allowedTags.concat(['img']),
+            allowedTags: sanitizeHtml.defaults.allowedTags.concat(['img', 'a']),
             allowedAttributes: {
+                'a': ['href', 'name', 'target'],
                 'img': ['src', 'alt']
             }
         });
@@ -364,7 +365,7 @@ async function saveToDB(data: Record<string, any>): Promise<void> {
         });
 
         if (post) {
-            await prisma.post.update({
+            const updatedPrismaObject = await prisma.post.update({
                 where: {
                     uuid: post.uuid
                 },
