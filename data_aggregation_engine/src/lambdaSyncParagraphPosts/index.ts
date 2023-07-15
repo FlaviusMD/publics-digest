@@ -2,6 +2,7 @@
 // Right now, we are not deleting all updated contents from S3. We are simply adding new entries. In saveDataToDB() function, delete all entry to S3.
 // Consider transforming metadata DB field into authors field and using that to search for DB saved content that has been updated in Arweave in the mean time.
 // Right now, we are updating content with the same title and previous 12 hours time. Not ideal as lots of posts can have the same title.
+// https://github.com/wooorm/franc
 
 /**
  * Should be ran every 3 mins as it has to perform loads of computations.
@@ -30,7 +31,8 @@ const TAGS = [{ name: "AppName", values: ["Paragraph"] }];
 const MOST_COMMON_ENGLISH_WORDS = new Set([
     'the', 'be', 'of', 'and', 'a', 'to', 'in', 'he', 'have', 'it', 'that', 'for', 'they', 'I', 'with', 'as', 'not', 'on', 'she', 'at', 'by', 'this', 'we', 'you', 'do', 'but', 'from', 'or', 'which', 'one', 'would', 'all', 'will', 'there', 'say', 'who', 'make', 'when', 'can', 'more', 'if', 'no', 'man', 'out', 'other', 'so', 'what', 'time', 'up', 'go', 'about', 'than', 'into', 'could', 'state', 'only', 'new', 'year', 'some', 'take', 'come', 'these', 'know', 'see', 'use', 'get', 'like', 'then', 'first', 'any', 'work', 'now', 'may', 'such', 'give', 'over', 'think', 'most', 'even', 'find', 'day', 'also', 'after', 'way', 'many', 'must', 'look', 'before', 'great', 'back', 'through', 'long', 'where', 'much', 'should', 'well', 'people', 'down', 'own', 'just', 'because', 'good', 'each', 'those', 'feel', 'seem', 'how', 'high', 'too', 'place', 'little', 'world', 'very', 'still', 'nation', 'hand', 'old', 'life', 'tell', 'write', 'become', 'here', 'show', 'house', 'both', 'between', 'need', 'mean', 'call', 'develop', 'under', 'last', 'right', 'move', 'thing', 'general', 'school', 'never', 'same', 'another', 'begin', 'while', 'number', 'part', 'turn', 'real', 'leave', 'might', 'want', 'point', 'form', 'off', 'child', 'few', 'small', 'since', 'against', 'ask', 'late', 'home', 'interest', 'large', 'person', 'end', 'open', 'public', 'follow', 'during', 'present', 'without', 'again', 'hold', 'govern', 'around', 'possible', 'head', 'consider', 'word', 'program', 'problem', 'however', 'lead', 'system', 'set', 'order', 'eye', 'plan', 'run', 'keep', 'face', 'fact', 'group', 'play', 'stand', 'increase', 'early', 'course', 'change', 'help', 'line'
 ]);
-const MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS = 20;
+// Increse MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS if you want the language filtering to be more strict.
+const MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS = 7;
 
 
 export default async function lambdaSyncParagraphPosts(defaultTrx?: string): Promise<void> {
@@ -259,11 +261,6 @@ async function getProcessedArweaveContent(latestArweaveTrxHash: string): Promise
         console.info(`Trx ${latestArweaveTrxHash} NOT saved because it is encrypted`);
         return null;
     }
-    // If content is NOT english, skip it.
-    if (!checkEnglishLanguage(arweaveContent.markdown, MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS)) {
-        console.info(`Trx ${latestArweaveTrxHash} NOT saved because language is NOT english`);
-        return null;
-    }
     // If content is NOT longer than 300 chars, it's not worth displaying.
     if (arweaveContent.markdown.length < 300) {
         console.info(`Trx ${latestArweaveTrxHash} NOT saved because content is shorter than 300 chars`);
@@ -278,6 +275,11 @@ async function getProcessedArweaveContent(latestArweaveTrxHash: string): Promise
     // Get processed content snippet
     const rawArweavePostContent = processStaticHTML(arweaveContent.staticHtml.substring(0, 5000), true);
     const processedPostContent = rawArweavePostContent.replace(/<[^>]+>/g, '').substring(0, 597) + '...';
+    // If content is NOT english, skip it.
+    if (!checkEnglishLanguage(processedPostContent, MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS)) {
+        console.info(`Trx ${latestArweaveTrxHash} NOT saved because language is NOT english`);
+        return null;
+    }
 
     // Get title
     const title = arweaveContent.title;
@@ -335,7 +337,7 @@ function processStaticHTML(staticHTML: string, removeLinks: boolean = false): St
     // sanitize and remove links
     if (removeLinks) {
         sanitizedHTML = sanitizeHtml(staticHTML, {
-            allowedTags: sanitizeHtml.defaults.allowedTags.filter(tag => tag !== 'link' && tag !== 'a')
+            allowedTags: sanitizeHtml.defaults.allowedTags.filter(tag => tag !== 'link' && tag !== 'a' && tag !== 'img')
         });
     } else {
         // general sanitization
@@ -365,7 +367,7 @@ async function saveToDB(data: Record<string, any>): Promise<void> {
         });
 
         if (post) {
-            const updatedPrismaObject = await prisma.post.update({
+            await prisma.post.update({
                 where: {
                     uuid: post.uuid
                 },
@@ -400,5 +402,3 @@ async function saveToDB(data: Record<string, any>): Promise<void> {
 
     console.info(`Post ${data.trxHash} has been saved to DB.`);
 }
-
-lambdaSyncParagraphPosts("OvlTr1tcbDXptn3W842tq1e1iMOh1_Md7KfQXXNlnfM");

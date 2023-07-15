@@ -6,7 +6,6 @@ import { S3 } from 'aws-sdk';
 import sanitizeHtml from 'sanitize-html';
 import { marked } from "marked";
 import { v4 as uuidv4 } from "uuid";
-import LanguageDetect from 'languagedetect';
 
 const s3 = new S3();
 const prisma = new PrismaClient();
@@ -15,12 +14,18 @@ const arweave = Arweave.init({
 	port: 443,
 	protocol: 'https'
 });
-const lngDetector = new LanguageDetect();
+
 
 const S3_BUCKET_NAME = "publicsdigestposts" // TODO Save in env variable
 const GRAPHQL_ARWEAVE_ENDPOINT = "https://arweave-search.goldsky.com/graphql"; // TODO Save in env variable to easily switch between official endpoint and goldsky in case of failure.
 const PUBLICATION_NAME = "MirrorXYZ";
 const TAGS = [{ name: "App-Name", values: ["MirrorXYZ"] }];
+const MOST_COMMON_ENGLISH_WORDS = new Set([
+	'the', 'be', 'of', 'and', 'a', 'to', 'in', 'he', 'have', 'it', 'that', 'for', 'they', 'I', 'with', 'as', 'not', 'on', 'she', 'at', 'by', 'this', 'we', 'you', 'do', 'but', 'from', 'or', 'which', 'one', 'would', 'all', 'will', 'there', 'say', 'who', 'make', 'when', 'can', 'more', 'if', 'no', 'man', 'out', 'other', 'so', 'what', 'time', 'up', 'go', 'about', 'than', 'into', 'could', 'state', 'only', 'new', 'year', 'some', 'take', 'come', 'these', 'know', 'see', 'use', 'get', 'like', 'then', 'first', 'any', 'work', 'now', 'may', 'such', 'give', 'over', 'think', 'most', 'even', 'find', 'day', 'also', 'after', 'way', 'many', 'must', 'look', 'before', 'great', 'back', 'through', 'long', 'where', 'much', 'should', 'well', 'people', 'down', 'own', 'just', 'because', 'good', 'each', 'those', 'feel', 'seem', 'how', 'high', 'too', 'place', 'little', 'world', 'very', 'still', 'nation', 'hand', 'old', 'life', 'tell', 'write', 'become', 'here', 'show', 'house', 'both', 'between', 'need', 'mean', 'call', 'develop', 'under', 'last', 'right', 'move', 'thing', 'general', 'school', 'never', 'same', 'another', 'begin', 'while', 'number', 'part', 'turn', 'real', 'leave', 'might', 'want', 'point', 'form', 'off', 'child', 'few', 'small', 'since', 'against', 'ask', 'late', 'home', 'interest', 'large', 'person', 'end', 'open', 'public', 'follow', 'during', 'present', 'without', 'again', 'hold', 'govern', 'around', 'possible', 'head', 'consider', 'word', 'program', 'problem', 'however', 'lead', 'system', 'set', 'order', 'eye', 'plan', 'run', 'keep', 'face', 'fact', 'group', 'play', 'stand', 'increase', 'early', 'course', 'change', 'help', 'line'
+]);
+// Increse MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS if you want the language filtering to be more strict.
+const MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS = 7;
+
 
 export default async function lambdaSyncMirrorPosts(defaultTrx?: string): Promise<void> {
 	// Create Publication if it doesn't exist.
@@ -263,12 +268,6 @@ async function getProcessedArweaveContent(latestArweaveTrxHash: string): Promise
 		console.info(`Trx ${latestArweaveTrxHash} NOT saved because it is encrypted`);
 		return null;
 	}
-	// If content is NOT english, skip it.
-	const mostLikelyLng = lngDetector.detect(arweaveContent.content.body.substring(0, 5000), 1)[0][0];
-	if (mostLikelyLng !== 'english') {
-		console.info(`Trx ${latestArweaveTrxHash} NOT saved because language is NOT english`);
-		return null;
-	}
 	// If content is NOT longer than 300 chars, it's not worth displaying.
 	if (arweaveContent.content.body.length < 300) {
 		console.info(`Trx ${latestArweaveTrxHash} NOT saved because content is shorter than 300 chars`);
@@ -284,7 +283,13 @@ async function getProcessedArweaveContent(latestArweaveTrxHash: string): Promise
 	const dirtyHTML = markdownToHTML(arweaveContent.content.body);
 	// const contentSnippet = processedPostContent.substring(0, 600);
 	const htmlForContentSnippet = processStaticHTML(dirtyHTML.substring(0, 5000), true);
-	const contentSnippet = htmlForContentSnippet.replace(/<[^>]+>/g, '').substring(0, 600);
+	const contentSnippet = htmlForContentSnippet.replace(/<[^>]+>/g, '').substring(0, 597) + '...';
+
+	// If content is NOT english, skip it.
+	if (!checkEnglishLanguage(contentSnippet, MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS)) {
+		console.info(`Trx ${latestArweaveTrxHash} NOT saved because language is NOT english`);
+		return null;
+	}
 
 	// Get title
 	const title = arweaveContent.content.title;
@@ -304,11 +309,37 @@ async function getProcessedArweaveContent(latestArweaveTrxHash: string): Promise
 }
 
 function markdownToHTML(markdownText: string): string {
-	// const processedMarkdown = markdownText.replace(/\n/g, ' ');
+	// if setting the headers to false is causing issues, install:
+	// https://www.npmjs.com/package/marked-mangle
+	// https://www.npmjs.com/package/marked-gfm-heading-id
+	return marked.parse(markdownText, { headerIds: false, mangle: false });
+}
 
-	// return marked.parse(processedMarkdown, { headerIds: false, mangle: false });
+/**
+ * Checks if a given text contains a minimum number of UNIQUE English words.
+ * @param textToCheck The text to check for English language.
+ * @param minimum_number_qunique_english_words The minimum number of unique English words required in the text.
+ * @returns A boolean indicating whether the text contains the minimum number of unique English words.
+ */
+function checkEnglishLanguage(textToCheck: string, minimum_number_qunique_english_words: number): boolean {
+	let counter = 0;
+	const wordsInText = textToCheck.split(/\W+/);
+	// const mostCommonEnglishWordsReplicated: Set<String> = MOST_COMMON_ENGLISH_WORDS;
 
-	return marked.parse(markdownText);
+	for (const word of wordsInText) {
+		if (counter === minimum_number_qunique_english_words) return true;
+
+		if (MOST_COMMON_ENGLISH_WORDS.has(word.toLowerCase())) {
+			counter++;
+		}
+
+		// if (mostCommonEnglishWordsReplicated.has(word.toLowerCase())) {
+		//     mostCommonEnglishWordsReplicated.delete(word.toLowerCase());
+		//     counter++;
+		// }
+	}
+
+	return false;
 }
 
 function processStaticHTML(staticHTML: string, removeLinks: boolean = false): string {
@@ -317,7 +348,7 @@ function processStaticHTML(staticHTML: string, removeLinks: boolean = false): st
 	// sanitize and remove links
 	if (removeLinks) {
 		sanitizedHTML = sanitizeHtml(staticHTML, {
-			allowedTags: sanitizeHtml.defaults.allowedTags.filter(tag => tag !== 'link' && tag !== 'a')
+			allowedTags: sanitizeHtml.defaults.allowedTags.filter(tag => tag !== 'link' && tag !== 'a' && tag !== 'img')
 		});
 	} else {
 		// general sanitization
@@ -382,5 +413,3 @@ async function saveToDB(data: Record<string, any>): Promise<void> {
 
 	console.info(`Post ${data.trxHash} has been saved to DB.`);
 }
-
-lambdaSyncMirrorPosts("f8ugbDwMGU1hljL4hQ2iokSwGEUpOIXmnC_HXnAPzYs");
