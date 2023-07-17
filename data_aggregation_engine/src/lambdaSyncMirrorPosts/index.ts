@@ -27,7 +27,13 @@ const MOST_COMMON_ENGLISH_WORDS = new Set([
 const MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS = 7;
 
 
-export default async function lambdaSyncMirrorPosts(defaultTrx?: string): Promise<void> {
+interface EventBridgeEvent {
+	detail?: {
+		defaultTrx: string;
+	};
+}
+
+export default async function lambdaSyncMirrorPosts(event: EventBridgeEvent): Promise<void> {
 	// Create Publication if it doesn't exist.
 	let publication = await prisma.publication.findUnique({
 		where: {
@@ -48,6 +54,7 @@ export default async function lambdaSyncMirrorPosts(defaultTrx?: string): Promis
 		}
 	}
 
+	const defaultTrx = event.detail?.defaultTrx;
 	let syncDbUntilTrx: string;
 
 	if (!defaultTrx) {

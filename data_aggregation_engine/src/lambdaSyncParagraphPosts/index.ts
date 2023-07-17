@@ -34,8 +34,13 @@ const MOST_COMMON_ENGLISH_WORDS = new Set([
 // Increse MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS if you want the language filtering to be more strict.
 const MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS = 7;
 
+interface EventBridgeEvent {
+    detail?: {
+        defaultTrx: string;
+    };
+}
 
-export default async function lambdaSyncParagraphPosts(defaultTrx?: string): Promise<void> {
+export default async function lambdaSyncParagraphPosts(event: EventBridgeEvent): Promise<void> {
     // Create Publication if it doesn't exist.
     let publication = await prisma.publication.findUnique({
         where: {
@@ -56,7 +61,7 @@ export default async function lambdaSyncParagraphPosts(defaultTrx?: string): Pro
         }
     }
 
-
+    const defaultTrx = event.detail?.defaultTrx;
     let syncDbUntilTrx: string;
 
     if (!defaultTrx) {
