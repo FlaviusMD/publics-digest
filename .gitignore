@@ -5,3 +5,10 @@ node_modules
 .vscode
 
 .DS_Store
+
+# Terraform initialised directories
+.terraform
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+.terraform.lock.hcl

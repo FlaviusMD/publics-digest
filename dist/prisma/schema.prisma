@@ -22,7 +22,7 @@ model Post {
   publishedAt      DateTime
   trxHash          String   @unique
   title            String
-  contentSnippet   String   @db.VarChar(350)
+  contentSnippet   String   @db.VarChar(600)
   fullContentS3URL String
   cursor           String
   publicationName  String

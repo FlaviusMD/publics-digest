@@ -5,7 +5,7 @@
     "main": "index.js",
     "scripts": {
         "test": "echo \"Error: no test specified\" && exit 1",
-        "build": "tsc && folderName=$(basename \"$PWD\") && cp package.json ../../dist/$folderName && cd ../../dist/$folderName && npm install --omit=dev"
+        "build": "tsc && folderName=$(basename \"$PWD\") && cp package.json ../../dist/$folderName && cp -r prisma ../../dist/$folderName && cp Dockerfile ../../dist/$folderName && cd ../../dist/$folderName && npm install --omit=dev"
     },
     "author": "Flavius Mardare",
     "license": "ISC",

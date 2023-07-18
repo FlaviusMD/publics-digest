@@ -40,7 +40,7 @@ interface EventBridgeEvent {
     };
 }
 
-export default async function lambdaSyncParagraphPosts(event: EventBridgeEvent): Promise<void> {
+const index = async (event: EventBridgeEvent): Promise<void> => {
     // Create Publication if it doesn't exist.
     let publication = await prisma.publication.findUnique({
         where: {
@@ -407,3 +407,7 @@ async function saveToDB(data: Record<string, any>): Promise<void> {
 
     console.info(`Post ${data.trxHash} has been saved to DB.`);
 }
+
+module.exports = {
+    handler: index
+};
