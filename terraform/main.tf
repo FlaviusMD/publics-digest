@@ -55,6 +55,8 @@ resource "aws_rds_cluster_instance" "publicsDigestDB-instance" {
     instance_class     = "db.serverless"
     engine             = aws_rds_cluster.publics-digest-db-cluster.engine
     engine_version     = aws_rds_cluster.publics-digest-db-cluster.engine_version
+
+    publicly_accessible = true
 }
 
 resource "aws_db_subnet_group" "publicsDigestDB_subnet_group" {

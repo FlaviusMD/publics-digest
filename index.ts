@@ -7,6 +7,7 @@ import { getPostsHandler } from './handlers/getPostsHandler';
 
 const PORT = 3000;
 const app = express();
+// Prisma prefers having one global instance for long running processes.
 const prisma = new PrismaClient();
 const eventEmitter = new EventEmitter();
 
