@@ -175,8 +175,44 @@ resource "aws_elastic_beanstalk_environment" "publicsDigestAPI_env" {
 
     setting {
         namespace = "aws:elasticbeanstalk:application:environment"
-        name      = "DATABASE_URL"
+        name      = "DATABASE_HOST"
         value     = aws_rds_cluster.publics-digest-db-cluster.endpoint
+    }
+
+    setting {
+        namespace = "aws:elasticbeanstalk:application:environment"
+        name      = "DATABASE_NAME"
+        value     = aws_rds_cluster.publics-digest-db-cluster.database_name
+    }
+
+    setting {
+        namespace = "aws:elasticbeanstalk:application:environment"
+        name      = "DATABASE_MASTER_USERNAME"
+        value     = aws_rds_cluster.publics-digest-db-cluster.master_username
+    }
+
+    setting {
+        namespace = "aws:elasticbeanstalk:application:environment"
+        name      = "DATABASE_MASTER_PASSWORD"
+        value     = aws_rds_cluster.publics-digest-db-cluster.master_password
+    }
+
+    setting {
+        namespace = "aws:elasticbeanstalk:application:environment"
+        name      = "DATABASE_PORT"
+        value     = aws_rds_cluster.publics-digest-db-cluster.port
+    }
+
+    setting {
+        namespace = "aws:elasticbeanstalk:application:environment"
+        name      = "DATABASE_URL"
+        value     = format("postgresql://%s:%s@%s:%s/%s",
+            aws_rds_cluster.publics-digest-db-cluster.master_username,
+            aws_rds_cluster.publics-digest-db-cluster.master_password,
+            aws_rds_cluster.publics-digest-db-cluster.endpoint,
+            aws_rds_cluster.publics-digest-db-cluster.port,
+            aws_rds_cluster.publics-digest-db-cluster.database_name
+        )
     }
 
     setting {
