@@ -122,13 +122,11 @@ const index = async (event: EventBridgeEvent): Promise<void> => {
         let postURL = await saveHTMLtoS3(contentInfo.fullContent, contentInfo.trxHash);
         contentInfo.fullContentS3URL = postURL;
 
-        // If we can't save the latest arweave post, we stop to ensure avoiding an infinite loop
-        // caused by the unreliable data retrieved from these outside sources we use. 
+        // Even if one Trx is problematic and we can't save it, we still try to save the rest.
         try {
             await saveToDB(contentInfo);
         } catch (error) {
-            console.log(`Not able to save latest arweave post to DB. Terminating the process gracefully... ERROR ${error}`);
-            return;
+            console.log(`Not able to save latest arweave post to DB. Trying to save the rest of the transactions... ERROR: ${error}`);
         }
     }
 
@@ -161,10 +159,8 @@ const index = async (event: EventBridgeEvent): Promise<void> => {
             try {
                 await saveToDB(contentInfo);
             } catch (error) {
-                // Decided to terminate the process to avoid infinite loops.
-                // These loops appear as the data we are retrieving is unreliable.
-                console.log(`Not able to save latest arweave post to DB. Terminating the process gracefully... ERROR: ${error}`);
-                return;
+                // Even if one Trx is problematic and we can't save it, we still try to save the rest.
+                console.log(`Not able to save latest arweave post to DB. Trying to save the rest of the transactions... ERROR: ${error}`);
             }
         }
     }
