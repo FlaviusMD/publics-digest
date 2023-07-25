@@ -2,7 +2,7 @@
 # https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/rds_cluster
 # https://docs.aws.amazon.com/elasticbeanstalk/latest/platforms/platforms-supported.html#platforms-supported.docker
 # https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/single-container-docker-configuration.html#single-container-docker-configuration.privaterepo
-
+# https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudfront_distribution.html
 
 provider "aws" {
     region = "eu-west-2"
@@ -236,6 +236,84 @@ resource "aws_elastic_beanstalk_application_version" "publics_digest_ebs_bucket_
     description = "application version created by terraform"
     bucket      = aws_s3_bucket.publics_digest_ebs_bucket.id
     key         = aws_s3_object.publics_digest_deployment.id
+}
+
+# ----- CDN for Elastic BeanStalk ----- #
+resource "aws_cloudfront_distribution" "beanstalk_distribution" {
+    origin {
+        domain_name = aws_elastic_beanstalk_environment.publicsDigestAPI_env.endpoint_url
+        origin_id   = "digest-beanstalk-api"
+
+        custom_origin_config {
+            http_port              = 80
+            https_port             = 443
+            origin_protocol_policy = "http-only"
+            origin_ssl_protocols   = ["TLSv1", "TLSv1.1", "TLSv1.2"]
+        }
+    }
+
+    enabled             = true
+    is_ipv6_enabled     = true
+    comment             = "CloudFront for Elastic Beanstalk Digest API"
+
+    default_cache_behavior {
+        allowed_methods  = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+        cached_methods   = ["GET", "HEAD"]
+        target_origin_id = "digest-beanstalk-api"
+
+        compress               = true
+
+        cache_policy_id        = aws_cloudfront_cache_policy.beanstalk_distribution_cache_policy.id
+
+        viewer_protocol_policy = "allow-all"
+        default_ttl            = 300
+    }
+
+    price_class = "PriceClass_All"
+
+    restrictions {
+        geo_restriction {
+            restriction_type = "none"
+        }
+    }
+
+    viewer_certificate {
+        cloudfront_default_certificate = true
+    }
+
+    depends_on = [aws_elastic_beanstalk_environment.publicsDigestAPI_env, aws_cloudfront_cache_policy.beanstalk_distribution_cache_policy]
+}
+
+resource "aws_cloudfront_cache_policy" "beanstalk_distribution_cache_policy" {
+    name        = "getPosts-cache-policy"
+    comment     = "caching for getPosts based on query string latestUUID"
+    default_ttl = 300
+    max_ttl     = 301
+    min_ttl     = 299
+
+
+    parameters_in_cache_key_and_forwarded_to_origin {
+        cookies_config {
+            cookie_behavior = "none"
+        }
+
+        headers_config {
+            header_behavior = "none"
+        }
+
+        query_strings_config {
+            query_string_behavior = "whitelist"
+            query_strings {
+                items = ["latestUUID"]
+            }
+        }
+    }
+}
+
+# ----- Outputs ----- #
+output "cloudfront_for_elastic_beanstalk_environment" {
+    description = "The CloudFront distribution URL for the Elastic Beanstalk BE API environment"
+    value       = aws_cloudfront_distribution.beanstalk_distribution.domain_name
 }
 
 output "rds_endpoint" {
