@@ -1,5 +1,5 @@
 # Based on OS/Arch: Linux, x86-64, ARM 64
-# When building for Linux, x86-64, ARM 64: docker build --platform linux/arm64 -t data-aggregation-mirror:1.0 .
+# When building for Linux, x86-64, ARM 64: docker build --platform linux/arm64 -t data-aggregation-paragraph:1.0 .
 FROM public.ecr.aws/lambda/nodejs:18.2023.07.19.03-x86_64
 
 WORKDIR ${LAMBDA_TASK_ROOT}

@@ -16,15 +16,15 @@ const arweave = Arweave.init({
 });
 
 
-const S3_BUCKET_NAME = "publicsdigestposts" // TODO Save in env variable
-const GRAPHQL_ARWEAVE_ENDPOINT = "https://arweave-search.goldsky.com/graphql"; // TODO Save in env variable to easily switch between official endpoint and goldsky in case of failure.
+const S3_BUCKET_NAME = process.env.S3_BUCKET_NAME || "publicsdigestposts";
+const GRAPHQL_ARWEAVE_ENDPOINT = process.env.GRAPHQL_ARWEAVE_ENDPOINT || "https://arweave-search.goldsky.com/graphql";
 const PUBLICATION_NAME = "MirrorXYZ";
 const TAGS = [{ name: "App-Name", values: ["MirrorXYZ"] }];
 const MOST_COMMON_ENGLISH_WORDS = new Set([
 	'the', 'be', 'of', 'and', 'a', 'to', 'in', 'he', 'have', 'it', 'that', 'for', 'they', 'I', 'with', 'as', 'not', 'on', 'she', 'at', 'by', 'this', 'we', 'you', 'do', 'but', 'from', 'or', 'which', 'one', 'would', 'all', 'will', 'there', 'say', 'who', 'make', 'when', 'can', 'more', 'if', 'no', 'man', 'out', 'other', 'so', 'what', 'time', 'up', 'go', 'about', 'than', 'into', 'could', 'state', 'only', 'new', 'year', 'some', 'take', 'come', 'these', 'know', 'see', 'use', 'get', 'like', 'then', 'first', 'any', 'work', 'now', 'may', 'such', 'give', 'over', 'think', 'most', 'even', 'find', 'day', 'also', 'after', 'way', 'many', 'must', 'look', 'before', 'great', 'back', 'through', 'long', 'where', 'much', 'should', 'well', 'people', 'down', 'own', 'just', 'because', 'good', 'each', 'those', 'feel', 'seem', 'how', 'high', 'too', 'place', 'little', 'world', 'very', 'still', 'nation', 'hand', 'old', 'life', 'tell', 'write', 'become', 'here', 'show', 'house', 'both', 'between', 'need', 'mean', 'call', 'develop', 'under', 'last', 'right', 'move', 'thing', 'general', 'school', 'never', 'same', 'another', 'begin', 'while', 'number', 'part', 'turn', 'real', 'leave', 'might', 'want', 'point', 'form', 'off', 'child', 'few', 'small', 'since', 'against', 'ask', 'late', 'home', 'interest', 'large', 'person', 'end', 'open', 'public', 'follow', 'during', 'present', 'without', 'again', 'hold', 'govern', 'around', 'possible', 'head', 'consider', 'word', 'program', 'problem', 'however', 'lead', 'system', 'set', 'order', 'eye', 'plan', 'run', 'keep', 'face', 'fact', 'group', 'play', 'stand', 'increase', 'early', 'course', 'change', 'help', 'line'
 ]);
 // Increse MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS if you want the language filtering to be more strict.
-const MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS = 7;
+const MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS: string = process.env.MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS || "7";
 
 
 interface EventBridgeEvent {
@@ -290,7 +290,7 @@ async function getProcessedArweaveContent(latestArweaveTrxHash: string): Promise
 	const contentSnippet = htmlForContentSnippet.replace(/<[^>]+>/g, '').substring(0, 597) + '...';
 
 	// If content is NOT english, skip it.
-	if (!checkEnglishLanguage(contentSnippet, MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS)) {
+	if (!checkEnglishLanguage(contentSnippet, parseInt(MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS))) {
 		console.info(`Trx ${latestArweaveTrxHash} NOT saved because language is NOT english`);
 		return null;
 	}

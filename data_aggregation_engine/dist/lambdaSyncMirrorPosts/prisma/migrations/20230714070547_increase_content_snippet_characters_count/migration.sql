@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Post" ALTER COLUMN "contentSnippet" SET DATA TYPE VARCHAR(600);
