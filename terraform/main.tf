@@ -5,94 +5,94 @@
 # https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudfront_distribution.html
 
 provider "aws" {
-    region = "eu-west-2"
+  region = "eu-west-2"
 }
 
 module "vpc" {
-    source  = "terraform-aws-modules/vpc/aws"
-    version = "5.1.0"
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "5.1.0"
 
-    name = "publicsDigest-VPC"
-    cidr = "10.0.0.0/16"
+  name = "publicsDigest-VPC"
+  cidr = "10.0.0.0/16"
 
-    azs             = ["eu-west-2a", "eu-west-2b"]
-    public_subnets  = ["10.0.1.0/24", "10.0.2.0/24"]
+  azs            = ["eu-west-2a", "eu-west-2b"]
+  public_subnets = ["10.0.1.0/24", "10.0.2.0/24"]
 
-    # For public access to RDS instance - not recommended in prod
-    create_database_subnet_group           = true
-    create_database_subnet_route_table     = true
-    create_database_internet_gateway_route = true
-    enable_dns_hostnames = true
-    enable_dns_support   = true
+  # For public access to RDS instance - not recommended in prod
+  create_database_subnet_group           = true
+  create_database_subnet_route_table     = true
+  create_database_internet_gateway_route = true
+  enable_dns_hostnames                   = true
+  enable_dns_support                     = true
 
-    tags = {
-        Terraform   = "true"
-        Environment = "prod"
-    }
+  tags = {
+    Terraform   = "true"
+    Environment = "prod"
+  }
 }
 
 # ----- Serverless Postgres RDS ----- #
 resource "aws_rds_cluster" "publics-digest-db-cluster" {
-    cluster_identifier = "publics-digest-db-cluster"
-    engine             = "aurora-postgresql"
-    engine_mode        = "provisioned"
-    engine_version     = "15.2"
-    database_name      = "publicsDigestDB"
-    master_username    = "publicsDigestDB"
-    master_password    = "publicsDigestDBPassword"
+  cluster_identifier = "publics-digest-db-cluster"
+  engine             = "aurora-postgresql"
+  engine_mode        = "provisioned"
+  engine_version     = "15.2"
+  database_name      = "publicsDigestDB"
+  master_username    = "publicsDigestDB"
+  master_password    = "publicsDigestDBPassword"
 
-    vpc_security_group_ids = [aws_security_group.publicsDigestDB-security-group.id]
-    db_subnet_group_name = aws_db_subnet_group.publicsDigestDB_subnet_group.name
+  vpc_security_group_ids = [aws_security_group.publicsDigestDB-security-group.id]
+  db_subnet_group_name   = aws_db_subnet_group.publicsDigestDB_subnet_group.name
 
-    serverlessv2_scaling_configuration {
-        max_capacity = 4.0
-        min_capacity = 0.5
-    }
+  serverlessv2_scaling_configuration {
+    max_capacity = 4.0
+    min_capacity = 0.5
+  }
 }
 
 resource "aws_rds_cluster_instance" "publicsDigestDB-instance" {
-    cluster_identifier = aws_rds_cluster.publics-digest-db-cluster.id
-    instance_class     = "db.serverless"
-    engine             = aws_rds_cluster.publics-digest-db-cluster.engine
-    engine_version     = aws_rds_cluster.publics-digest-db-cluster.engine_version
+  cluster_identifier = aws_rds_cluster.publics-digest-db-cluster.id
+  instance_class     = "db.serverless"
+  engine             = aws_rds_cluster.publics-digest-db-cluster.engine
+  engine_version     = aws_rds_cluster.publics-digest-db-cluster.engine_version
 
-    publicly_accessible = true
+  publicly_accessible = true
 }
 
 resource "aws_db_subnet_group" "publicsDigestDB_subnet_group" {
-    name       = "db-subnet-groups"
-    subnet_ids = module.vpc.public_subnets
+  name       = "db-subnet-groups"
+  subnet_ids = module.vpc.public_subnets
 
-    tags = {
-        Name = "db-subnet-groups"
-    }
+  tags = {
+    Name = "db-subnet-groups"
+  }
 }
 
 resource "aws_security_group" "publicsDigestDB-security-group" {
-    name        = "publicsDigestDB-security-group"
-    description = "Allow inbound traffic to RDS"
-    vpc_id      = module.vpc.vpc_id
+  name        = "publicsDigestDB-security-group"
+  description = "Allow inbound traffic to RDS"
+  vpc_id      = module.vpc.vpc_id
 
-    ingress {
-        from_port   = 5432
-        to_port     = 5432
-        protocol    = "tcp"
-        cidr_blocks = ["0.0.0.0/0"]
-    }
+  ingress {
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 
-    egress {
-        from_port   = 5432
-        to_port     = 5432
-        protocol    = "tcp"
-        cidr_blocks = ["0.0.0.0/0"]
-    }
+  egress {
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 }
 
 # ----- Elastic BeanStalk ----- #
 resource "aws_iam_role" "beanstalk_service" {
-    name = "beanstalk_role"
+  name = "beanstalk_role"
 
-    assume_role_policy = <<EOF
+  assume_role_policy = <<EOF
     {
         "Version": "2012-10-17",
         "Statement": [
@@ -110,218 +110,406 @@ resource "aws_iam_role" "beanstalk_service" {
 }
 
 resource "aws_iam_role_policy_attachment" "beanstalk_log_attach" {
-    role       = aws_iam_role.beanstalk_service.name
-    policy_arn = "arn:aws:iam::aws:policy/AWSElasticBeanstalkWebTier"
+  role       = aws_iam_role.beanstalk_service.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSElasticBeanstalkWebTier"
 }
 
 resource "aws_iam_role_policy_attachment" "beanstalk_ecr_attach" {
-    role       = aws_iam_role.beanstalk_service.name
-    policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+  role       = aws_iam_role.beanstalk_service.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
 }
 
 resource "aws_iam_policy" "publics_digest_ebs_bucket_policy" {
-    name        = "publics_digest_ebs_bucket_policy"
-    policy      = jsonencode({
-        Version = "2012-10-17"
-        Statement = [
-            {
-                Effect   = "Allow"
-                Action   = "s3:GetObject"
-                Resource = "${aws_s3_bucket.publics_digest_ebs_bucket.arn}/*"
-            }
-        ]
-    })
-
-    depends_on = [
-        aws_s3_bucket.publics_digest_ebs_bucket
+  name = "publics_digest_ebs_bucket_policy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "s3:GetObject"
+        Resource = "${aws_s3_bucket.publics_digest_ebs_bucket.arn}/*"
+      }
     ]
+  })
+
+  depends_on = [
+    aws_s3_bucket.publics_digest_ebs_bucket
+  ]
 }
 
 resource "aws_iam_role_policy_attachment" "publics_digest_ebs_bucket_attach" {
-    policy_arn = aws_iam_policy.publics_digest_ebs_bucket_policy.arn
-    role       = aws_iam_role.beanstalk_service.name
+  policy_arn = aws_iam_policy.publics_digest_ebs_bucket_policy.arn
+  role       = aws_iam_role.beanstalk_service.name
 }
 
 resource "aws_iam_instance_profile" "beanstalk_iam_instance_profile" {
-    name = "beanstalk_iam_instance_profile"
-    role = aws_iam_role.beanstalk_service.name
+  name = "beanstalk_iam_instance_profile"
+  role = aws_iam_role.beanstalk_service.name
 }
 
 resource "aws_s3_bucket" "publics_digest_ebs_bucket" {
-    bucket = "publics-digest-beanstalk-ebs"
-    
-    tags = {
-        Name = "Publics Digest EBS"
-    }
+  bucket = "publics-digest-beanstalk-ebs"
+
+  tags = {
+    Name = "Publics Digest EBS"
+  }
 }
 
 resource "aws_s3_object" "publics_digest_deployment" {
-    bucket = aws_s3_bucket.publics_digest_ebs_bucket.id
-    key    = "Dockerrun.aws.json"
-    source = "Dockerrun.aws.json"
+  bucket = aws_s3_bucket.publics_digest_ebs_bucket.id
+  key    = "Dockerrun.aws.json"
+  source = "Dockerrun.aws.json"
 }
 
 resource "aws_elastic_beanstalk_application" "publicsDigestAPI" {
-    name        = "publicsDigestAPI"
-    description = "Backend API for publicsDigest"
+  name        = "publicsDigestAPI"
+  description = "Backend API for publicsDigest"
 }
 
 resource "aws_elastic_beanstalk_environment" "publicsDigestAPI_env" {
-    name                = "publicsDigestAPI-env"
-    application         = aws_elastic_beanstalk_application.publicsDigestAPI.name
-    version_label       = aws_elastic_beanstalk_application_version.publics_digest_ebs_bucket_version.name
-    solution_stack_name = "64bit Amazon Linux 2 v3.5.9 running Docker"
-    cname_prefix        = "digest"
+  name                = "publicsDigestAPI-env"
+  application         = aws_elastic_beanstalk_application.publicsDigestAPI.name
+  version_label       = aws_elastic_beanstalk_application_version.publics_digest_ebs_bucket_version.name
+  solution_stack_name = "64bit Amazon Linux 2 v3.5.9 running Docker"
+  cname_prefix        = "digest"
 
-    setting {
-        namespace = "aws:elasticbeanstalk:application:environment"
-        name      = "DATABASE_HOST"
-        value     = aws_rds_cluster.publics-digest-db-cluster.endpoint
-    }
+  setting {
+    namespace = "aws:elasticbeanstalk:application:environment"
+    name      = "DATABASE_HOST"
+    value     = aws_rds_cluster.publics-digest-db-cluster.endpoint
+  }
 
-    setting {
-        namespace = "aws:elasticbeanstalk:application:environment"
-        name      = "DATABASE_NAME"
-        value     = aws_rds_cluster.publics-digest-db-cluster.database_name
-    }
+  setting {
+    namespace = "aws:elasticbeanstalk:application:environment"
+    name      = "DATABASE_NAME"
+    value     = aws_rds_cluster.publics-digest-db-cluster.database_name
+  }
 
-    setting {
-        namespace = "aws:elasticbeanstalk:application:environment"
-        name      = "DATABASE_MASTER_USERNAME"
-        value     = aws_rds_cluster.publics-digest-db-cluster.master_username
-    }
+  setting {
+    namespace = "aws:elasticbeanstalk:application:environment"
+    name      = "DATABASE_MASTER_USERNAME"
+    value     = aws_rds_cluster.publics-digest-db-cluster.master_username
+  }
 
-    setting {
-        namespace = "aws:elasticbeanstalk:application:environment"
-        name      = "DATABASE_MASTER_PASSWORD"
-        value     = aws_rds_cluster.publics-digest-db-cluster.master_password
-    }
+  setting {
+    namespace = "aws:elasticbeanstalk:application:environment"
+    name      = "DATABASE_MASTER_PASSWORD"
+    value     = aws_rds_cluster.publics-digest-db-cluster.master_password
+  }
 
-    setting {
-        namespace = "aws:elasticbeanstalk:application:environment"
-        name      = "DATABASE_PORT"
-        value     = aws_rds_cluster.publics-digest-db-cluster.port
-    }
+  setting {
+    namespace = "aws:elasticbeanstalk:application:environment"
+    name      = "DATABASE_PORT"
+    value     = aws_rds_cluster.publics-digest-db-cluster.port
+  }
 
-    setting {
-        namespace = "aws:elasticbeanstalk:application:environment"
-        name      = "DATABASE_URL"
-        value     = format("postgresql://%s:%s@%s:%s/%s",
-            aws_rds_cluster.publics-digest-db-cluster.master_username,
-            aws_rds_cluster.publics-digest-db-cluster.master_password,
-            aws_rds_cluster.publics-digest-db-cluster.endpoint,
-            aws_rds_cluster.publics-digest-db-cluster.port,
-            aws_rds_cluster.publics-digest-db-cluster.database_name
-        )
-    }
+  setting {
+    namespace = "aws:elasticbeanstalk:application:environment"
+    name      = "DATABASE_URL"
+    value = format("postgresql://%s:%s@%s:%s/%s",
+      aws_rds_cluster.publics-digest-db-cluster.master_username,
+      aws_rds_cluster.publics-digest-db-cluster.master_password,
+      aws_rds_cluster.publics-digest-db-cluster.endpoint,
+      aws_rds_cluster.publics-digest-db-cluster.port,
+      aws_rds_cluster.publics-digest-db-cluster.database_name
+    )
+  }
 
-    setting {
-        namespace = "aws:autoscaling:launchconfiguration"
-        name      = "IamInstanceProfile"
-        value     = aws_iam_instance_profile.beanstalk_iam_instance_profile.arn
-    }
+  setting {
+    namespace = "aws:autoscaling:launchconfiguration"
+    name      = "IamInstanceProfile"
+    value     = aws_iam_instance_profile.beanstalk_iam_instance_profile.arn
+  }
 
-    setting {
-        namespace = "aws:elasticbeanstalk:cloudwatch:logs"
-        name      = "StreamLogs"
-        value     = "True"
-    }
+  setting {
+    namespace = "aws:elasticbeanstalk:cloudwatch:logs"
+    name      = "StreamLogs"
+    value     = "True"
+  }
 
-    depends_on = [aws_rds_cluster_instance.publicsDigestDB-instance]
+  depends_on = [aws_rds_cluster_instance.publicsDigestDB-instance]
 }
 
 resource "aws_elastic_beanstalk_application_version" "publics_digest_ebs_bucket_version" {
-    name        = "publicsDigestAPI-version"
-    application = aws_elastic_beanstalk_application.publicsDigestAPI.name
-    description = "application version created by terraform"
-    bucket      = aws_s3_bucket.publics_digest_ebs_bucket.id
-    key         = aws_s3_object.publics_digest_deployment.id
+  name        = "publicsDigestAPI-version"
+  application = aws_elastic_beanstalk_application.publicsDigestAPI.name
+  description = "application version created by terraform"
+  bucket      = aws_s3_bucket.publics_digest_ebs_bucket.id
+  key         = aws_s3_object.publics_digest_deployment.id
 }
 
 # ----- CDN for Elastic BeanStalk ----- #
 resource "aws_cloudfront_distribution" "beanstalk_distribution" {
-    origin {
-        domain_name = aws_elastic_beanstalk_environment.publicsDigestAPI_env.endpoint_url
-        origin_id   = "digest-beanstalk-api"
+  origin {
+    domain_name = aws_elastic_beanstalk_environment.publicsDigestAPI_env.endpoint_url
+    origin_id   = "digest-beanstalk-api"
 
-        custom_origin_config {
-            http_port              = 80
-            https_port             = 443
-            origin_protocol_policy = "http-only"
-            origin_ssl_protocols   = ["TLSv1", "TLSv1.1", "TLSv1.2"]
-        }
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "http-only"
+      origin_ssl_protocols   = ["TLSv1", "TLSv1.1", "TLSv1.2"]
     }
+  }
 
-    enabled             = true
-    is_ipv6_enabled     = true
-    comment             = "CloudFront for Elastic Beanstalk Digest API"
+  enabled         = true
+  is_ipv6_enabled = true
+  comment         = "CloudFront for Elastic Beanstalk Digest API"
 
-    default_cache_behavior {
-        allowed_methods  = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
-        cached_methods   = ["GET", "HEAD"]
-        target_origin_id = "digest-beanstalk-api"
+  default_cache_behavior {
+    allowed_methods  = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = "digest-beanstalk-api"
 
-        compress               = true
+    compress = true
 
-        cache_policy_id        = aws_cloudfront_cache_policy.beanstalk_distribution_cache_policy.id
+    cache_policy_id = aws_cloudfront_cache_policy.beanstalk_distribution_cache_policy.id
 
-        viewer_protocol_policy = "allow-all"
-        default_ttl            = 300
+    viewer_protocol_policy = "allow-all"
+    default_ttl            = 300
+  }
+
+  price_class = "PriceClass_All"
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
     }
+  }
 
-    price_class = "PriceClass_All"
+  viewer_certificate {
+    cloudfront_default_certificate = true
+  }
 
-    restrictions {
-        geo_restriction {
-            restriction_type = "none"
-        }
-    }
-
-    viewer_certificate {
-        cloudfront_default_certificate = true
-    }
-
-    depends_on = [aws_elastic_beanstalk_environment.publicsDigestAPI_env, aws_cloudfront_cache_policy.beanstalk_distribution_cache_policy]
+  depends_on = [aws_elastic_beanstalk_environment.publicsDigestAPI_env, aws_cloudfront_cache_policy.beanstalk_distribution_cache_policy]
 }
 
 resource "aws_cloudfront_cache_policy" "beanstalk_distribution_cache_policy" {
-    name        = "getPosts-cache-policy"
-    comment     = "caching for getPosts based on query string latestUUID"
-    default_ttl = 300
-    max_ttl     = 301
-    min_ttl     = 299
+  name        = "getPosts-cache-policy"
+  comment     = "caching for getPosts based on query string latestUUID"
+  default_ttl = 300
+  max_ttl     = 301
+  min_ttl     = 299
 
 
-    parameters_in_cache_key_and_forwarded_to_origin {
-        cookies_config {
-            cookie_behavior = "none"
-        }
-
-        headers_config {
-            header_behavior = "none"
-        }
-
-        query_strings_config {
-            query_string_behavior = "whitelist"
-            query_strings {
-                items = ["latestUUID"]
-            }
-        }
+  parameters_in_cache_key_and_forwarded_to_origin {
+    cookies_config {
+      cookie_behavior = "none"
     }
+
+    headers_config {
+      header_behavior = "none"
+    }
+
+    query_strings_config {
+      query_string_behavior = "whitelist"
+      query_strings {
+        items = ["latestUUID"]
+      }
+    }
+  }
+}
+
+# ----- Data Aggregation Lambdas ----- #
+locals {
+  lambda_function = {
+    mirrorDataAggregation = {
+      #   handler                     = "index.handler"
+      timeout                     = 900
+      image_uri                   = "${data.aws_ecr_repository.data_aggregation_mirror_ecr.repository_url}:${var.mirror_data_aggregation_image_tag}"
+      package_type                = "Image"
+      architectures               = ["x86_64"]
+      memory_size                 = 256
+      iam_role_resource_reference = aws_iam_role.data_aggregation_lambda_role
+      vpc_config = {
+        subnet_ids         = module.vpc.public_subnets
+        security_group_ids = [aws_security_group.data_aggregation_lambda_security_group.id]
+      }
+
+      environment_variables = {
+        S3_BUCKET_NAME                      = "publicsdigestposts"
+        GRAPHQL_ARWEAVE_ENDPOINT            = "https://arweave-search.goldsky.com/graphql"
+        MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS = "7"
+        DATABASE_URL = format("postgresql://%s:%s@%s:%s/%s",
+          aws_rds_cluster.publics-digest-db-cluster.master_username,
+          aws_rds_cluster.publics-digest-db-cluster.master_password,
+          aws_rds_cluster.publics-digest-db-cluster.endpoint,
+          aws_rds_cluster.publics-digest-db-cluster.port,
+          aws_rds_cluster.publics-digest-db-cluster.database_name
+        )
+      }
+    },
+    paragraphDataAggregation = {
+      #   handler                     = "index.handler"
+      timeout                     = 900
+      image_uri                   = "${data.aws_ecr_repository.data_aggregation_paragraph_ecr.repository_url}:${var.paragraph_data_aggregation_image_tag}"
+      package_type                = "Image"
+      architectures               = ["x86_64"]
+      memory_size                 = 256
+      iam_role_resource_reference = aws_iam_role.data_aggregation_lambda_role
+      vpc_config = {
+        subnet_ids         = module.vpc.public_subnets
+        security_group_ids = [aws_security_group.data_aggregation_lambda_security_group.id]
+      }
+
+      environment_variables = {
+        S3_BUCKET_NAME                      = "publicsdigestposts"
+        GRAPHQL_ARWEAVE_ENDPOINT            = "https://arweave-search.goldsky.com/graphql"
+        MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS = "7"
+        DATABASE_URL = format("postgresql://%s:%s@%s:%s/%s",
+          aws_rds_cluster.publics-digest-db-cluster.master_username,
+          aws_rds_cluster.publics-digest-db-cluster.master_password,
+          aws_rds_cluster.publics-digest-db-cluster.endpoint,
+          aws_rds_cluster.publics-digest-db-cluster.port,
+          aws_rds_cluster.publics-digest-db-cluster.database_name
+        )
+      }
+    }
+  }
+}
+
+module "data_aggregation_lambdas" {
+  for_each = local.lambda_function
+
+  source = "./modules/lambda"
+
+  function_name = each.key
+  #   handler                     = each.value.handler
+  timeout                     = each.value.timeout
+  image_uri                   = each.value.image_uri
+  package_type                = each.value.package_type
+  architectures               = each.value.architectures
+  memory_size                 = each.value.memory_size
+  iam_role_resource_reference = each.value.iam_role_resource_reference
+  vpc_config                  = each.value.vpc_config
+  environment_variables       = each.value.environment_variables
+}
+
+resource "aws_security_group" "data_aggregation_lambda_security_group" {
+  name        = "lambda_security_group"
+  description = "Allow complete inbound and outbound traffic for this lambda"
+  vpc_id      = module.vpc.vpc_id
+
+  ingress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+
+data "aws_ecr_repository" "data_aggregation_mirror_ecr" {
+  name = "data-aggregation-mirror"
+}
+
+data "aws_ecr_repository" "data_aggregation_paragraph_ecr" {
+  name = "data-aggregation-paragraph"
+}
+
+# Define IAM Role for lambda to assume 
+resource "aws_iam_role" "data_aggregation_lambda_role" {
+  name = "data_aggregation_lambda_role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+        Effect = "Allow"
+        Sid    = ""
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "data_aggregation_lambda_vpc_network_creation_access" {
+  name = "data_aggregation_lambda_vpc_network_creation_access"
+  role = aws_iam_role.data_aggregation_lambda_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "ec2:CreateNetworkInterface",
+          "ec2:DescribeNetworkInterfaces",
+          "ec2:DeleteNetworkInterface"
+        ],
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "data_aggregation_lambda_ecr_attach" {
+  role       = aws_iam_role.data_aggregation_lambda_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+}
+
+resource "aws_iam_role_policy" "data_aggregation_lambda_rds_policy" {
+  name = "rdsAccessPolicy"
+  role = aws_iam_role.data_aggregation_lambda_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "rds:*"
+        ],
+        Resource = [
+          "${aws_rds_cluster.publics-digest-db-cluster.arn}"
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "data_aggregation_lambda_logging_policy" {
+  name = "dataAggregationLambdaLoggingPolicy"
+  role = aws_iam_role.data_aggregation_lambda_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ],
+        Resource = "arn:aws:logs:*:*:*"
+      }
+    ]
+  })
 }
 
 # ----- Outputs ----- #
 output "cloudfront_for_elastic_beanstalk_environment" {
-    description = "The CloudFront distribution URL for the Elastic Beanstalk BE API environment"
-    value       = aws_cloudfront_distribution.beanstalk_distribution.domain_name
+  description = "The CloudFront distribution URL for the Elastic Beanstalk BE API environment"
+  value       = aws_cloudfront_distribution.beanstalk_distribution.domain_name
 }
 
 output "rds_endpoint" {
-    description = "The connection endpoint for the RDS DB instance"
-    value       = aws_rds_cluster.publics-digest-db-cluster.endpoint
+  description = "The connection endpoint for the RDS DB instance"
+  value       = aws_rds_cluster.publics-digest-db-cluster.endpoint
 }
 
 output "elastic_beanstalk_environment" {
-    description = "The URL to the EB environment"
-    value       = aws_elastic_beanstalk_environment.publicsDigestAPI_env.endpoint_url
+  description = "The URL to the EB environment"
+  value       = aws_elastic_beanstalk_environment.publicsDigestAPI_env.endpoint_url
 }
