@@ -33,7 +33,7 @@ interface EventBridgeEvent {
 	};
 }
 
-const index = async (event: EventBridgeEvent): Promise<void> => {
+const index = async (event?: EventBridgeEvent): Promise<void> => {
 	// Create Publication if it doesn't exist.
 	let publication = await prisma.publication.findUnique({
 		where: {
@@ -55,7 +55,7 @@ const index = async (event: EventBridgeEvent): Promise<void> => {
 		}
 	}
 
-	const defaultTrx = event.detail?.defaultTrx;
+	const defaultTrx = event?.detail?.defaultTrx;
 	let syncDbUntilTrx: string;
 
 	if (!defaultTrx) {

@@ -48,7 +48,7 @@ const index = async (event) => {
             throw error;
         }
     }
-    const defaultTrx = event.detail?.defaultTrx;
+    const defaultTrx = event?.detail?.defaultTrx;
     let syncDbUntilTrx;
     if (!defaultTrx) {
         const latestDBPost = await prisma.post.findFirst({
