@@ -314,13 +314,13 @@ resource "aws_cloudfront_cache_policy" "beanstalk_distribution_cache_policy" {
 locals {
   lambda_function = {
     mirrorDataAggregation = {
-      #   handler                     = "index.handler"
       timeout                     = 900
       image_uri                   = "${data.aws_ecr_repository.data_aggregation_mirror_ecr.repository_url}:${var.mirror_data_aggregation_image_tag}"
       package_type                = "Image"
       architectures               = ["x86_64"]
       memory_size                 = 256
       iam_role_resource_reference = aws_iam_role.data_aggregation_lambda_role
+      eventbridge_rule_reference  = aws_cloudwatch_event_rule.sync_db_to_arweave_rule
       vpc_config = {
         subnet_ids         = module.vpc.public_subnets
         security_group_ids = [aws_security_group.data_aggregation_lambda_security_group.id]
@@ -340,13 +340,13 @@ locals {
       }
     },
     paragraphDataAggregation = {
-      #   handler                     = "index.handler"
       timeout                     = 900
       image_uri                   = "${data.aws_ecr_repository.data_aggregation_paragraph_ecr.repository_url}:${var.paragraph_data_aggregation_image_tag}"
       package_type                = "Image"
       architectures               = ["x86_64"]
       memory_size                 = 256
       iam_role_resource_reference = aws_iam_role.data_aggregation_lambda_role
+      eventbridge_rule_reference  = aws_cloudwatch_event_rule.sync_db_to_arweave_rule
       vpc_config = {
         subnet_ids         = module.vpc.public_subnets
         security_group_ids = [aws_security_group.data_aggregation_lambda_security_group.id]
@@ -373,14 +373,14 @@ module "data_aggregation_lambdas" {
 
   source = "./modules/lambda"
 
-  function_name = each.key
-  #   handler                     = each.value.handler
+  function_name               = each.key
   timeout                     = each.value.timeout
   image_uri                   = each.value.image_uri
   package_type                = each.value.package_type
   architectures               = each.value.architectures
   memory_size                 = each.value.memory_size
   iam_role_resource_reference = each.value.iam_role_resource_reference
+  eventbridge_rule_reference  = each.value.eventbridge_rule_reference
   vpc_config                  = each.value.vpc_config
   environment_variables       = each.value.environment_variables
 }
@@ -496,6 +496,67 @@ resource "aws_iam_role_policy" "data_aggregation_lambda_logging_policy" {
       }
     ]
   })
+}
+
+# ----- EventBridge for Triggering Lambdas ----- #
+resource "aws_iam_role" "eventbridge_role" {
+  name = "eventbridge_role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Action = "sts:AssumeRole",
+        Principal = {
+          Service = "events.amazonaws.com"
+        },
+        Effect = "Allow",
+        Sid    = ""
+      }
+    ]
+  })
+}
+
+# IAM policy for EventBridge to invoke Lambda
+resource "aws_iam_role_policy" "eventbridge_policy" {
+  name = "eventbridge_policy"
+  role = aws_iam_role.eventbridge_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Action   = "lambda:InvokeFunction",
+        Effect   = "Allow",
+        Resource = "arn:aws:lambda:*:*:function:*"
+      }
+    ]
+  })
+}
+
+# EventBridge rule
+resource "aws_cloudwatch_event_rule" "sync_db_to_arweave_rule" {
+  name                = "sync_db_to_arweave_rule"
+  schedule_expression = "cron(0/5 * * * ? *)" # every 5th minute.
+  role_arn            = aws_iam_role.eventbridge_role.arn
+}
+
+# EventBridge target that triggers the Lambda function
+resource "aws_cloudwatch_event_target" "sync_mirror_target" {
+  rule      = aws_cloudwatch_event_rule.sync_db_to_arweave_rule.name
+  target_id = "sync_mirror"
+  arn       = module.data_aggregation_lambdas["mirrorDataAggregation"].function_arn
+
+  depends_on = [module.data_aggregation_lambdas["mirrorDataAggregation"]]
+}
+
+# EventBridge target that triggers the Lambda function
+resource "aws_cloudwatch_event_target" "sync_paragraph_target" {
+  rule      = aws_cloudwatch_event_rule.sync_db_to_arweave_rule.name
+  target_id = "sync_paragraph"
+  arn       = module.data_aggregation_lambdas["paragraphDataAggregation"].function_arn
+
+  depends_on = [module.data_aggregation_lambdas["paragraphDataAggregation"]]
 }
 
 # ----- Outputs ----- #

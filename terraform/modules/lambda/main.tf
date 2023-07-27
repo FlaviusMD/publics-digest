@@ -1,11 +1,11 @@
 variable "function_name" {}
-# variable "handler" {}
 variable "timeout" {}
 variable "image_uri" {}
 variable "package_type" {}
 variable "architectures" {}
 variable "memory_size" {}
 variable "iam_role_resource_reference" {}
+variable "eventbridge_rule_reference" {}
 variable "vpc_config" {
   type    = map(any)
   default = {}
@@ -17,7 +17,6 @@ variable "environment_variables" {
 
 resource "aws_lambda_function" "this" {
   function_name = var.function_name
-  #   handler       = var.handler
   timeout       = var.timeout
   image_uri     = var.image_uri
   package_type  = var.package_type
@@ -33,6 +32,15 @@ resource "aws_lambda_function" "this" {
     subnet_ids         = var.vpc_config.subnet_ids
     security_group_ids = var.vpc_config.security_group_ids
   }
+}
+
+# Permission for Lambda to be invoked by EventBridge
+resource "aws_lambda_permission" "allow_eventbridge" {
+  statement_id  = "AllowExecutionFromEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = var.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = var.eventbridge_rule_reference.arn
 }
 
 output "function_arn" {
