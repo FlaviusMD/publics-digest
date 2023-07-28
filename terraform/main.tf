@@ -328,7 +328,7 @@ resource "aws_cloudfront_cache_policy" "beanstalk_distribution_cache_policy" {
 locals {
   lambda_function = {
     mirrorDataAggregation = {
-      timeout                     = 900
+      timeout                     = 500
       image_uri                   = "${data.aws_ecr_repository.data_aggregation_mirror_ecr.repository_url}:${var.mirror_data_aggregation_image_tag}"
       package_type                = "Image"
       architectures               = ["x86_64"]
@@ -354,7 +354,7 @@ locals {
       }
     },
     paragraphDataAggregation = {
-      timeout                     = 900
+      timeout                     = 500
       image_uri                   = "${data.aws_ecr_repository.data_aggregation_paragraph_ecr.repository_url}:${var.paragraph_data_aggregation_image_tag}"
       package_type                = "Image"
       architectures               = ["x86_64"]
@@ -593,7 +593,7 @@ resource "aws_iam_role_policy" "eventbridge_policy" {
 # EventBridge rule
 resource "aws_cloudwatch_event_rule" "sync_db_to_arweave_rule" {
   name                = "sync_db_to_arweave_rule"
-  schedule_expression = "cron(0/5 * * * ? *)" # every 5th minute.
+  schedule_expression = "cron(0/10 * * * ? *)" # every 10th minute.
   role_arn            = aws_iam_role.eventbridge_role.arn
 }
 
