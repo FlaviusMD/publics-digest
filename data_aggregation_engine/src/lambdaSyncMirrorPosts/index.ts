@@ -193,6 +193,7 @@ async function saveHTMLtoS3(fullContent: string, trxHash: string): Promise<strin
 
 async function getArweaveGraphQlData(latestCursor?: string): Promise<Array<Record<string, any>>> {
 	if (!latestCursor) {
+		console.info(`Inside getArweaveGraphQlData--- latestCursor NOT specified. Retrieving just the latest TrxHash`)
 		const arweaveQuery = `
 		query($tags: [TagFilter!]) {
 			transactions(tags: $tags, first: 1, sort:HEIGHT_DESC) {
@@ -219,10 +220,12 @@ async function getArweaveGraphQlData(latestCursor?: string): Promise<Array<Recor
 
 			return latestArweaveData.data.data.transactions.edges;
 		} catch (error: any) {
-			console.error(error.response.data);
+			console.error(`The hashes of Arweave Posts could NOT be retrieved: ERROR ${error}`);
 			throw error;
 		}
 	} else {
+		console.info(`Inside getArweaveGraphQlData--- latestCursor specified. Retrieving a batch of 10 TrxHash`)
+
 		const arweaveQuery = `
 		query($tags: [TagFilter!], $cursor: String!) {
 			transactions(tags: $tags, first: 10, after: $cursor, sort:HEIGHT_DESC) {
@@ -250,7 +253,7 @@ async function getArweaveGraphQlData(latestCursor?: string): Promise<Array<Recor
 
 			return latestArweaveData.data.data.transactions.edges;
 		} catch (error: any) {
-			console.error(`The hashes of Arweave Posts could NOT be retrieved ${error.response.data}`);
+			console.error(`The hashes of Arweave Posts could NOT be retrieved: ERROR ${error}`);
 			throw error;
 		}
 	}

@@ -318,7 +318,7 @@ locals {
       image_uri                   = "${data.aws_ecr_repository.data_aggregation_mirror_ecr.repository_url}:${var.mirror_data_aggregation_image_tag}"
       package_type                = "Image"
       architectures               = ["x86_64"]
-      memory_size                 = 256
+      memory_size                 = 512
       iam_role_resource_reference = aws_iam_role.data_aggregation_lambda_role
       eventbridge_rule_reference  = aws_cloudwatch_event_rule.sync_db_to_arweave_rule
       vpc_config = {
@@ -344,7 +344,7 @@ locals {
       image_uri                   = "${data.aws_ecr_repository.data_aggregation_paragraph_ecr.repository_url}:${var.paragraph_data_aggregation_image_tag}"
       package_type                = "Image"
       architectures               = ["x86_64"]
-      memory_size                 = 256
+      memory_size                 = 512
       iam_role_resource_reference = aws_iam_role.data_aggregation_lambda_role
       eventbridge_rule_reference  = aws_cloudwatch_event_rule.sync_db_to_arweave_rule
       vpc_config = {
