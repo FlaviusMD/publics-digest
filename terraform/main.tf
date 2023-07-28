@@ -17,13 +17,19 @@ module "vpc" {
 
   azs            = ["eu-west-2a", "eu-west-2b", "eu-west-2c"]
   public_subnets = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+  private_subnets = ["10.0.4.0/24", "10.0.5.0/24", "10.0.6.0/24"]
 
-  enable_nat_gateway = false
+  enable_nat_gateway = true
+  single_nat_gateway = true
   enable_vpn_gateway = false
   create_igw         = true
 
   public_subnet_tags = {
     Name = "publicsDigest-VPC-public-subnet"
+  }
+
+  private_subnet_tags = {
+    Name = "publicsDigest-VPC-private-subnet"
   }
 
   # For public access to RDS instance - not recommended in prod
@@ -330,7 +336,7 @@ locals {
       iam_role_resource_reference = aws_iam_role.data_aggregation_lambda_role
       eventbridge_rule_reference  = aws_cloudwatch_event_rule.sync_db_to_arweave_rule
       vpc_config = {
-        subnet_ids         = module.vpc.public_subnets
+        subnet_ids         = module.vpc.private_subnets
         security_group_ids = [aws_security_group.data_aggregation_lambda_security_group.id]
       }
 
@@ -356,7 +362,7 @@ locals {
       iam_role_resource_reference = aws_iam_role.data_aggregation_lambda_role
       eventbridge_rule_reference  = aws_cloudwatch_event_rule.sync_db_to_arweave_rule
       vpc_config = {
-        subnet_ids         = module.vpc.public_subnets
+        subnet_ids         = module.vpc.private_subnets
         security_group_ids = [aws_security_group.data_aggregation_lambda_security_group.id]
       }
 
@@ -503,6 +509,25 @@ resource "aws_iam_role_policy" "data_aggregation_lambda_rds_policy" {
         ],
         Resource = [
           "${aws_rds_cluster.publics-digest-db-cluster.arn}"
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "data_aggregation_lambda_access_s3" {
+  name = "s3AccessPolicy"
+  role = aws_iam_role.data_aggregation_lambda_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = "s3:*",
+        Resource = [
+          "arn:aws:s3:::publicsdigestposts",
+          "arn:aws:s3:::publicsdigestposts/*"
         ]
       }
     ]
