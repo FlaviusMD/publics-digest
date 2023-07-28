@@ -15,8 +15,16 @@ module "vpc" {
   name = "publicsDigest-VPC"
   cidr = "10.0.0.0/16"
 
-  azs            = ["eu-west-2a", "eu-west-2b"]
-  public_subnets = ["10.0.1.0/24", "10.0.2.0/24"]
+  azs            = ["eu-west-2a", "eu-west-2b", "eu-west-2c"]
+  public_subnets = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+
+  enable_nat_gateway = false
+  enable_vpn_gateway = false
+  create_igw         = true
+
+  public_subnet_tags = {
+    Name = "publicsDigest-VPC-public-subnet"
+  }
 
   # For public access to RDS instance - not recommended in prod
   create_database_subnet_group           = true
@@ -405,6 +413,26 @@ resource "aws_security_group" "data_aggregation_lambda_security_group" {
   }
 }
 
+# Allow traffic from the public subnets
+resource "aws_security_group_rule" "public_subnet_ingress" {
+  type              = "ingress"
+  from_port         = 0
+  to_port           = 65535
+  protocol          = "tcp"
+  cidr_blocks       = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+  security_group_id = aws_security_group.data_aggregation_lambda_security_group.id
+}
+
+# Allow traffic to the public subnets
+resource "aws_security_group_rule" "public_subnet_egress" {
+  type              = "egress"
+  from_port         = 0
+  to_port           = 65535
+  protocol          = "tcp"
+  cidr_blocks       = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+  security_group_id = aws_security_group.data_aggregation_lambda_security_group.id
+}
+
 
 data "aws_ecr_repository" "data_aggregation_mirror_ecr" {
   name = "data-aggregation-mirror"
@@ -445,7 +473,10 @@ resource "aws_iam_role_policy" "data_aggregation_lambda_vpc_network_creation_acc
         Action = [
           "ec2:CreateNetworkInterface",
           "ec2:DescribeNetworkInterfaces",
-          "ec2:DeleteNetworkInterface"
+          "ec2:DeleteNetworkInterface",
+          "ec2:DescribeSecurityGroups",
+          "ec2:DescribeSubnets",
+          "ec2:DescribeVpcs"
         ],
         Resource = "*"
       }
