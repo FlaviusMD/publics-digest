@@ -30,7 +30,7 @@ model Post {
 
   publication Publication @relation(fields: [publicationName], references: [name], onDelete: Cascade)
 
-  trendingPosts TrendingPost[] @relation("PostToTrendingPost")
+  trendingPosts TrendingPost[]
 
   @@index([publishedAt])
 }
@@ -40,5 +40,5 @@ model TrendingPost {
   uuid      String   @unique
   createdAt DateTime
 
-  posts Post[] @relation("PostToTrendingPost")
+  posts Post[]
 }
