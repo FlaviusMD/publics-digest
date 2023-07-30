@@ -30,5 +30,15 @@ model Post {
 
   publication Publication @relation(fields: [publicationName], references: [name], onDelete: Cascade)
 
+  trendingPosts TrendingPost[] @relation("PostToTrendingPost")
+
   @@index([publishedAt])
+}
+
+model TrendingPost {
+  id        Int      @id @default(autoincrement())
+  uuid      String   @unique
+  createdAt DateTime
+
+  posts Post[] @relation("PostToTrendingPost")
 }
