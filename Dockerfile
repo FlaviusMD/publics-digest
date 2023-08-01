@@ -1,4 +1,4 @@
-# when building for linux/amd64, which is necessary for AWS Linux AMI: docker build --platform linux/amd64 -t publics-digest-api:1.0 .  
+# when building for (x86-64)linux/amd64, which is necessary for AWS Linux AMI: docker build --platform linux/amd64 -t publics-digest-api:1.0 .  
 FROM node:18.16-alpine
 
 WORKDIR /app

@@ -12,7 +12,7 @@ const requestBodySchema = Joi.object({
 });
 
 export const createTrendingPostHandler = async (req: Request, res: Response, prisma: PrismaClient): Promise<Response> => {
-    const body: IRequestBody = JSON.parse(req.body || '{}');
+    const body: IRequestBody = req.body || {};
     const validationResult = requestBodySchema.validate(body);
 
     if (validationResult.error) {
@@ -25,6 +25,7 @@ export const createTrendingPostHandler = async (req: Request, res: Response, pri
     }
 
     const requestBody: IRequestBody = validationResult.value;
+
     let postsOfTrendingPost: Post[] = [];
 
     for (let trxHash of requestBody.trxHashes) {
@@ -47,14 +48,16 @@ export const createTrendingPostHandler = async (req: Request, res: Response, pri
         await prisma.trendingPost.create({
             data: {
                 uuid: uuidv4(),
-                createdAt: new Date().toUTCString(),
+                createdAt: new Date(new Date().toUTCString()),
                 posts: {
                     connect: postsOfTrendingPost.map(post => ({ id: post.id }))
                 }
             }
         })
     } catch (error: any) {
-        console.error(`Unable to create new TrendingPost. DateTime: ${new Date().toUTCString()}`)
+        console.error(`Unable to create new TrendingPost. 
+            DateTime: ${new Date().toUTCString()}. 
+            Error: ${error.message}`)
 
         return res.status(500).json({
             message: "Unable to create a new TrendingPost entry",

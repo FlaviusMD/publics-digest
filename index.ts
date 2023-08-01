@@ -25,6 +25,7 @@ const initialiseListners = async () => {
 initialiseListners();
 
 app.use(cors());
+app.use(express.json());
 
 app.get('/getPosts', async (req, res) => {
     await getPostsHandler(req, res, prisma);
