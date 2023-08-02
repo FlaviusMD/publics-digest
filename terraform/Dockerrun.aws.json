@@ -1,7 +1,7 @@
 {
     "AWSEBDockerrunVersion": "1",
     "Image": {
-        "Name": "583640685860.dkr.ecr.eu-west-2.amazonaws.com/publics-digest-api:1.0",
+        "Name": "583640685860.dkr.ecr.eu-west-2.amazonaws.com/publics-digest-api:2.0",
         "Update": "true"
     },
     "Ports": [

@@ -169,10 +169,19 @@ resource "aws_s3_bucket" "publics_digest_ebs_bucket" {
   }
 }
 
-resource "aws_s3_object" "publics_digest_deployment" {
+resource "aws_s3_bucket_versioning" "publics_digest_ebs_bucket_versioning" {
   bucket = aws_s3_bucket.publics_digest_ebs_bucket.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_object" "publics_digest_deployment" {
+  bucket = aws_s3_bucket_versioning.publics_digest_ebs_bucket_versioning.id
   key    = "Dockerrun.aws.json"
   source = "Dockerrun.aws.json"
+  # etag   = filemd5("Dockerrun.aws.json") /*Creates a hash of the file to force redeployment of BeanStalk when the Dockerrun file changes. Comment out if you don't want to redeploy Beanstalk.*/
 }
 
 resource "aws_elastic_beanstalk_application" "publicsDigestAPI" {
@@ -241,7 +250,7 @@ resource "aws_elastic_beanstalk_environment" "publicsDigestAPI_env" {
     value     = "True"
   }
 
-  depends_on = [aws_rds_cluster_instance.publicsDigestDB-instance]
+  depends_on = [aws_rds_cluster_instance.publicsDigestDB-instance, aws_elastic_beanstalk_application_version.publics_digest_ebs_bucket_version]
 }
 
 resource "aws_elastic_beanstalk_application_version" "publics_digest_ebs_bucket_version" {
@@ -270,6 +279,34 @@ resource "aws_cloudfront_distribution" "beanstalk_distribution" {
   is_ipv6_enabled = true
   comment         = "CloudFront for Elastic Beanstalk Digest API"
 
+  ordered_cache_behavior {
+    path_pattern     = "/getPosts*"
+    allowed_methods  = ["GET", "HEAD"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = "digest-beanstalk-api"
+
+    compress = true
+
+    cache_policy_id = aws_cloudfront_cache_policy.beanstalk_get_latest_posts_cache_policy.id
+
+    viewer_protocol_policy = "allow-all"
+    default_ttl            = 300
+  }
+
+  ordered_cache_behavior {
+    path_pattern = "/posts/trending"
+    allowed_methods  = ["GET", "HEAD"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = "digest-beanstalk-api"
+
+    compress = true
+
+    cache_policy_id = aws_cloudfront_cache_policy.beanstalk_get_trending_posts_cache_policy.id
+
+    viewer_protocol_policy = "allow-all"
+    default_ttl            = 14400 /*4 hours*/
+  }
+
   default_cache_behavior {
     allowed_methods  = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
     cached_methods   = ["GET", "HEAD"]
@@ -277,10 +314,20 @@ resource "aws_cloudfront_distribution" "beanstalk_distribution" {
 
     compress = true
 
-    cache_policy_id = aws_cloudfront_cache_policy.beanstalk_distribution_cache_policy.id
-
     viewer_protocol_policy = "allow-all"
-    default_ttl            = 300
+
+    forwarded_values {
+      query_string = true
+      headers      = ["*"]
+
+      cookies {
+        forward = "all"
+      }
+    }
+
+    min_ttl                = 0
+    default_ttl            = 0
+    max_ttl                = 0
   }
 
   price_class = "PriceClass_All"
@@ -295,10 +342,10 @@ resource "aws_cloudfront_distribution" "beanstalk_distribution" {
     cloudfront_default_certificate = true
   }
 
-  depends_on = [aws_elastic_beanstalk_environment.publicsDigestAPI_env, aws_cloudfront_cache_policy.beanstalk_distribution_cache_policy]
+  depends_on = [aws_elastic_beanstalk_environment.publicsDigestAPI_env, aws_cloudfront_cache_policy.beanstalk_get_latest_posts_cache_policy]
 }
 
-resource "aws_cloudfront_cache_policy" "beanstalk_distribution_cache_policy" {
+resource "aws_cloudfront_cache_policy" "beanstalk_get_latest_posts_cache_policy" {
   name        = "getPosts-cache-policy"
   comment     = "caching for getPosts based on query string latestUUID"
   default_ttl = 300
@@ -320,6 +367,28 @@ resource "aws_cloudfront_cache_policy" "beanstalk_distribution_cache_policy" {
       query_strings {
         items = ["latestUUID"]
       }
+    }
+  }
+}
+
+resource "aws_cloudfront_cache_policy" "beanstalk_get_trending_posts_cache_policy" {
+  name = "posts-trending-cache-policy"
+  comment = "caches trending posts for 4 hours"
+  default_ttl = 14400
+  max_ttl = 14401
+  min_ttl = 14399
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    cookies_config {
+      cookie_behavior = "none"
+    }
+
+    headers_config {
+      header_behavior = "none"
+    }
+
+    query_strings_config {
+      query_string_behavior = "none"
     }
   }
 }
