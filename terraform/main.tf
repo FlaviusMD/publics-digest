@@ -169,6 +169,20 @@ resource "aws_s3_bucket" "publics_digest_ebs_bucket" {
   }
 }
 
+resource "aws_s3_bucket_lifecycle_configuration" "publics_digest_ebs_bucket_lifecycle" {
+  bucket = aws_s3_bucket.publics_digest_ebs_bucket.id
+
+  rule {
+    id      = "Move non-current versions to Glacier after 7 days"
+    status  = "Enabled"
+
+    noncurrent_version_transition {
+      noncurrent_days           = 7
+      storage_class             = "GLACIER_IR"
+    }
+  }
+}
+
 resource "aws_s3_bucket_versioning" "publics_digest_ebs_bucket_versioning" {
   bucket = aws_s3_bucket.publics_digest_ebs_bucket.id
 
@@ -181,7 +195,7 @@ resource "aws_s3_object" "publics_digest_deployment" {
   bucket = aws_s3_bucket_versioning.publics_digest_ebs_bucket_versioning.id
   key    = "Dockerrun.aws.json"
   source = "Dockerrun.aws.json"
-  # etag   = filemd5("Dockerrun.aws.json") /*Creates a hash of the file to force redeployment of BeanStalk when the Dockerrun file changes. Comment out if you don't want to redeploy Beanstalk.*/
+  etag   = filemd5("Dockerrun.aws.json") /*Creates a hash of the file to force redeployment of BeanStalk when the Dockerrun file changes. Comment out if you don't want to redeploy Beanstalk.*/
 }
 
 resource "aws_elastic_beanstalk_application" "publicsDigestAPI" {
