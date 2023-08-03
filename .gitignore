@@ -34,3 +34,6 @@ terraform.tfstate.backup
 *.njsproj
 *.sln
 *.sw?
+
+# Keys
+*.pem

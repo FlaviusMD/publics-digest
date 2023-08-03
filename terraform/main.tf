@@ -123,6 +123,26 @@ resource "aws_iam_role" "beanstalk_service" {
     EOF
 }
 
+resource "aws_iam_role_policy" "cloudwatch_logs_streaming_for_ebs_policy" {
+  name = "allow_cloudwatch_logs_streaming_for_ebs"
+  role = aws_iam_role.beanstalk_service.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = "arn:aws:logs:*:*:*"
+      }
+    ]
+  })
+}
+
 resource "aws_iam_role_policy_attachment" "beanstalk_log_attach" {
   role       = aws_iam_role.beanstalk_service.name
   policy_arn = "arn:aws:iam::aws:policy/AWSElasticBeanstalkWebTier"
@@ -256,6 +276,13 @@ resource "aws_elastic_beanstalk_environment" "publicsDigestAPI_env" {
     namespace = "aws:autoscaling:launchconfiguration"
     name      = "IamInstanceProfile"
     value     = aws_iam_instance_profile.beanstalk_iam_instance_profile.arn
+  }
+
+  // for ssh access to the ec2 instance
+  setting {
+    namespace = "aws:autoscaling:launchconfiguration"
+    name      = "EC2KeyName"
+    value     = "digest-api-ssh"
   }
 
   setting {
