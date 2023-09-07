@@ -306,7 +306,7 @@ resource "aws_elastic_beanstalk_application_version" "publics_digest_ebs_bucket_
 resource "aws_cloudfront_distribution" "beanstalk_distribution" {
   origin {
     domain_name = aws_elastic_beanstalk_environment.publicsDigestAPI_env.endpoint_url
-    origin_id   = "digest-beanstalk-api"
+    origin_id   = "digest-beanstalk-api-${terraform.workspace}"
 
     custom_origin_config {
       http_port              = 80
@@ -318,27 +318,27 @@ resource "aws_cloudfront_distribution" "beanstalk_distribution" {
 
   enabled         = true
   is_ipv6_enabled = true
-  comment         = "CloudFront for Elastic Beanstalk Digest API"
+  comment         = "CloudFront for Elastic Beanstalk Digest API -${terraform.workspace}"
 
   ordered_cache_behavior {
     path_pattern     = "/getPosts*"
     allowed_methods  = ["GET", "HEAD"]
     cached_methods   = ["GET", "HEAD"]
-    target_origin_id = "digest-beanstalk-api"
+    target_origin_id = "digest-beanstalk-api-${terraform.workspace}"
 
     compress = true
 
     cache_policy_id = aws_cloudfront_cache_policy.beanstalk_get_latest_posts_cache_policy.id
 
     viewer_protocol_policy = "allow-all"
-    default_ttl            = 300
+    default_ttl            = 300 /*5 minutes*/
   }
 
   ordered_cache_behavior {
     path_pattern = "/posts/trending"
     allowed_methods  = ["GET", "HEAD"]
     cached_methods   = ["GET", "HEAD"]
-    target_origin_id = "digest-beanstalk-api"
+    target_origin_id = "digest-beanstalk-api-${terraform.workspace}"
 
     compress = true
 
@@ -351,7 +351,7 @@ resource "aws_cloudfront_distribution" "beanstalk_distribution" {
   default_cache_behavior {
     allowed_methods  = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
     cached_methods   = ["GET", "HEAD"]
-    target_origin_id = "digest-beanstalk-api"
+    target_origin_id = "digest-beanstalk-api-${terraform.workspace}"
 
     compress = true
 
@@ -387,7 +387,7 @@ resource "aws_cloudfront_distribution" "beanstalk_distribution" {
 }
 
 resource "aws_cloudfront_cache_policy" "beanstalk_get_latest_posts_cache_policy" {
-  name        = "getPosts-cache-policy"
+  name        = "getPosts-cache-policy-${terraform.workspace}"
   comment     = "caching for getPosts based on query string latestUUID"
   default_ttl = 300
   max_ttl     = 301
@@ -413,7 +413,7 @@ resource "aws_cloudfront_cache_policy" "beanstalk_get_latest_posts_cache_policy"
 }
 
 resource "aws_cloudfront_cache_policy" "beanstalk_get_trending_posts_cache_policy" {
-  name = "posts-trending-cache-policy"
+  name = "posts-trending-cache-policy-${terraform.workspace}"
   comment = "caches trending posts for 4 hours"
   default_ttl = 14400
   max_ttl = 14401
@@ -451,7 +451,7 @@ locals {
       }
 
       environment_variables = {
-        S3_BUCKET_NAME                      = "publicsdigestposts"
+        S3_BUCKET_NAME                      = var.posts_storage_bucket
         GRAPHQL_ARWEAVE_ENDPOINT            = "https://arweave-search.goldsky.com/graphql"
         MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS = "7"
         DATABASE_URL = format("postgresql://%s:%s@%s:%s/%s",
@@ -477,7 +477,7 @@ locals {
       }
 
       environment_variables = {
-        S3_BUCKET_NAME                      = "publicsdigestposts"
+        S3_BUCKET_NAME                      = var.posts_storage_bucket
         GRAPHQL_ARWEAVE_ENDPOINT            = "https://arweave-search.goldsky.com/graphql"
         MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS = "7"
         DATABASE_URL = format("postgresql://%s:%s@%s:%s/%s",
@@ -497,7 +497,7 @@ module "data_aggregation_lambdas" {
 
   source = "./modules/lambda"
 
-  function_name               = each.key
+  function_name               = "${each.key}-${terraform.workspace}"
   timeout                     = each.value.timeout
   image_uri                   = each.value.image_uri
   package_type                = each.value.package_type
@@ -510,10 +510,11 @@ module "data_aggregation_lambdas" {
 }
 
 resource "aws_security_group" "data_aggregation_lambda_security_group" {
-  name        = "lambda_security_group"
+  name        = "lambda-security-group-${terraform.workspace}"
   description = "Allow complete inbound and outbound traffic for this lambda"
   vpc_id      = module.vpc.vpc_id
 
+  ## NOTE: Probably don't need these ingress and egress rules as I have aws_security_group_rule resources below.
   ingress {
     from_port   = 0
     to_port     = 0
@@ -528,6 +529,9 @@ resource "aws_security_group" "data_aggregation_lambda_security_group" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
+
+## NOTE: I might not need both ingress and egress rules as AWS security groups are stateful.
+## This means that if you allow incoming traffic from an IP, the response is automatically allowed, regardless of outbound rules. 
 
 # Allow traffic from the public subnets
 resource "aws_security_group_rule" "public_subnet_ingress" {
@@ -549,7 +553,6 @@ resource "aws_security_group_rule" "public_subnet_egress" {
   security_group_id = aws_security_group.data_aggregation_lambda_security_group.id
 }
 
-
 data "aws_ecr_repository" "data_aggregation_mirror_ecr" {
   name = "data-aggregation-mirror"
 }
@@ -560,7 +563,7 @@ data "aws_ecr_repository" "data_aggregation_paragraph_ecr" {
 
 # Define IAM Role for lambda to assume 
 resource "aws_iam_role" "data_aggregation_lambda_role" {
-  name = "data_aggregation_lambda_role"
+  name = "data-aggregation-lambda-role-${terraform.workspace}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -578,7 +581,7 @@ resource "aws_iam_role" "data_aggregation_lambda_role" {
 }
 
 resource "aws_iam_role_policy" "data_aggregation_lambda_vpc_network_creation_access" {
-  name = "data_aggregation_lambda_vpc_network_creation_access"
+  name = "data-aggregation-lambda-vpc-network-creation-access-${terraform.workspace}"
   role = aws_iam_role.data_aggregation_lambda_role.id
 
   policy = jsonencode({
@@ -606,7 +609,7 @@ resource "aws_iam_role_policy_attachment" "data_aggregation_lambda_ecr_attach" {
 }
 
 resource "aws_iam_role_policy" "data_aggregation_lambda_rds_policy" {
-  name = "rdsAccessPolicy"
+  name = "rdsAccessPolicy-${terraform.workspace}"
   role = aws_iam_role.data_aggregation_lambda_role.id
 
   policy = jsonencode({
@@ -626,7 +629,7 @@ resource "aws_iam_role_policy" "data_aggregation_lambda_rds_policy" {
 }
 
 resource "aws_iam_role_policy" "data_aggregation_lambda_access_s3" {
-  name = "s3AccessPolicy"
+  name = "s3AccessPolicy-${terraform.workspace}"
   role = aws_iam_role.data_aggregation_lambda_role.id
 
   policy = jsonencode({
@@ -636,8 +639,8 @@ resource "aws_iam_role_policy" "data_aggregation_lambda_access_s3" {
         Effect = "Allow",
         Action = "s3:*",
         Resource = [
-          "arn:aws:s3:::publicsdigestposts",
-          "arn:aws:s3:::publicsdigestposts/*"
+          "arn:aws:s3:::${var.posts_storage_bucket}",
+          "arn:aws:s3:::${var.posts_storage_bucket}/*"
         ]
       }
     ]
@@ -645,7 +648,7 @@ resource "aws_iam_role_policy" "data_aggregation_lambda_access_s3" {
 }
 
 resource "aws_iam_role_policy" "data_aggregation_lambda_logging_policy" {
-  name = "dataAggregationLambdaLoggingPolicy"
+  name = "dataAggregationLambdaLoggingPolicy-${terraform.workspace}"
   role = aws_iam_role.data_aggregation_lambda_role.id
 
   policy = jsonencode({
@@ -666,7 +669,7 @@ resource "aws_iam_role_policy" "data_aggregation_lambda_logging_policy" {
 
 # ----- EventBridge for Triggering Lambdas ----- #
 resource "aws_iam_role" "eventbridge_role" {
-  name = "eventbridge_role"
+  name = "eventbridge-role-${terraform.workspace}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17",
@@ -685,7 +688,7 @@ resource "aws_iam_role" "eventbridge_role" {
 
 # IAM policy for EventBridge to invoke Lambda
 resource "aws_iam_role_policy" "eventbridge_policy" {
-  name = "eventbridge_policy"
+  name = "eventbridge-policy-${terraform.workspace}"
   role = aws_iam_role.eventbridge_role.id
 
   policy = jsonencode({
@@ -702,7 +705,7 @@ resource "aws_iam_role_policy" "eventbridge_policy" {
 
 # EventBridge rule
 resource "aws_cloudwatch_event_rule" "sync_db_to_arweave_rule" {
-  name                = "sync_db_to_arweave_rule"
+  name                = "sync-db-to-arweave-rule-${terraform.workspace}"
   schedule_expression = "cron(0/10 * * * ? *)" # every 10th minute.
   role_arn            = aws_iam_role.eventbridge_role.arn
 }
@@ -710,7 +713,7 @@ resource "aws_cloudwatch_event_rule" "sync_db_to_arweave_rule" {
 # EventBridge target that triggers the Lambda function
 resource "aws_cloudwatch_event_target" "sync_mirror_target" {
   rule      = aws_cloudwatch_event_rule.sync_db_to_arweave_rule.name
-  target_id = "sync_mirror"
+  target_id = "sync-mirror-${terraform.workspace}"
   arn       = module.data_aggregation_lambdas["mirrorDataAggregation"].function_arn
 
   depends_on = [module.data_aggregation_lambdas["mirrorDataAggregation"]]
@@ -719,7 +722,7 @@ resource "aws_cloudwatch_event_target" "sync_mirror_target" {
 # EventBridge target that triggers the Lambda function
 resource "aws_cloudwatch_event_target" "sync_paragraph_target" {
   rule      = aws_cloudwatch_event_rule.sync_db_to_arweave_rule.name
-  target_id = "sync_paragraph"
+  target_id = "sync-paragraph-${terraform.workspace}"
   arn       = module.data_aggregation_lambdas["paragraphDataAggregation"].function_arn
 
   depends_on = [module.data_aggregation_lambdas["paragraphDataAggregation"]]
