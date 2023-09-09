@@ -1,0 +1,4 @@
+SELECT COUNT(*) FROM "Post" WHERE metadata->>'authors' IS NOT NULL AND metadata->>'authors' != '';
+
+
+-- SELECT COUNT(*) FROM "Post";
