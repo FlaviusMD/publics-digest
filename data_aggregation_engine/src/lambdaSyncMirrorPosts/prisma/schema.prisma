@@ -10,6 +10,39 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model Writer {
+  id     Int @id @default(autoincrement())
+  userId Int @unique
+
+  user User @relation(fields: [userId], references: [id])
+
+  post Post[]
+}
+
+model Reader {
+  id     Int @id @default(autoincrement())
+  userId Int @unique
+
+  user User @relation(fields: [userId], references: [id])
+
+  post Post[]
+}
+
+model User {
+  id            Int      @id @default(autoincrement())
+  walletAddress String   @unique
+  createdAt     DateTime
+  updatedAt     DateTime
+  email         String?  @unique
+  ens           String?  @unique
+  image         String?
+  bio           String?
+  username      String?  @unique
+
+  writer Writer?
+  reader Reader?
+}
+
 model Publication {
   name String @id @unique
 
@@ -22,6 +55,8 @@ model Post {
   publishedAt      DateTime
   trxHash          String   @unique
   title            String
+  seoTitle         String
+  coverImageURL    String
   contentSnippet   String   @db.VarChar(600)
   fullContentS3URL String
   cursor           String
@@ -31,6 +66,11 @@ model Post {
   publication Publication @relation(fields: [publicationName], references: [name], onDelete: Cascade)
 
   trendingPosts TrendingPost[]
+
+  writerId Int
+  writer   Writer @relation(fields: [writerId], references: [id])
+
+  readers Reader[]
 
   @@index([publishedAt])
 }

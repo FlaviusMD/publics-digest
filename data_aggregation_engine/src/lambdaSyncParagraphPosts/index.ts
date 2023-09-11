@@ -22,9 +22,8 @@ const arweave = Arweave.init({
     protocol: 'https'
 });
 
-// TODO Save in env variable
+
 const S3_BUCKET_NAME = process.env.S3_BUCKET_NAME || "publicsdigestposts";
-// TODO Save in env variable to easily switch between official endpoint and goldsky in case of failure.
 const GRAPHQL_ARWEAVE_ENDPOINT = process.env.GRAPHQL_ARWEAVE_ENDPOINT || "https://arweave-search.goldsky.com/graphql";
 const PUBLICATION_NAME = "Paragraph";
 const TAGS = [{ name: "AppName", values: ["Paragraph"] }];
