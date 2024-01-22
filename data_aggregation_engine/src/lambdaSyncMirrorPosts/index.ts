@@ -16,7 +16,7 @@ const arweave = Arweave.init({
 });
 
 
-const S3_BUCKET_NAME = process.env.S3_BUCKET_NAME || "publicsdigestposts";
+const S3_BUCKET_NAME = process.env.S3_BUCKET_NAME || "digest-posts-html";
 const GRAPHQL_ARWEAVE_ENDPOINT = process.env.GRAPHQL_ARWEAVE_ENDPOINT || "https://arweave-search.goldsky.com/graphql";
 const PUBLICATION_NAME = "MirrorXYZ";
 const TAGS = [{ name: "App-Name", values: ["MirrorXYZ"] }];

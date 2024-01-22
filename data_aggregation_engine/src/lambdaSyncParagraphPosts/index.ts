@@ -7,403 +7,411 @@
 /**
  * Should be ran every 3 mins as it has to perform loads of computations.
  */
-const Arweave = require("arweave");
-import { PrismaClient } from '@prisma/client';
-import axios from "axios";
-import { S3 } from 'aws-sdk';
-import sanitizeHtml from 'sanitize-html';
-import { v4 as uuidv4 } from 'uuid';
+// const Arweave = require("arweave");
+// import { PrismaClient } from '@prisma/client';
+// import axios from "axios";
+// import { S3 } from 'aws-sdk';
+// import sanitizeHtml from 'sanitize-html';
+// import { v4 as uuidv4 } from 'uuid';
+// import { franc } from 'franc-min'
 
-const s3 = new S3();
-const prisma = new PrismaClient();
-const arweave = Arweave.init({
-    host: 'arweave.net',
-    port: 443,
-    protocol: 'https'
-});
-
-
-const S3_BUCKET_NAME = process.env.S3_BUCKET_NAME || "publicsdigestposts";
-const GRAPHQL_ARWEAVE_ENDPOINT = process.env.GRAPHQL_ARWEAVE_ENDPOINT || "https://arweave-search.goldsky.com/graphql";
-const PUBLICATION_NAME = "Paragraph";
-const TAGS = [{ name: "AppName", values: ["Paragraph"] }];
-const MOST_COMMON_ENGLISH_WORDS = new Set([
-    'the', 'be', 'of', 'and', 'a', 'to', 'in', 'he', 'have', 'it', 'that', 'for', 'they', 'I', 'with', 'as', 'not', 'on', 'she', 'at', 'by', 'this', 'we', 'you', 'do', 'but', 'from', 'or', 'which', 'one', 'would', 'all', 'will', 'there', 'say', 'who', 'make', 'when', 'can', 'more', 'if', 'no', 'man', 'out', 'other', 'so', 'what', 'time', 'up', 'go', 'about', 'than', 'into', 'could', 'state', 'only', 'new', 'year', 'some', 'take', 'come', 'these', 'know', 'see', 'use', 'get', 'like', 'then', 'first', 'any', 'work', 'now', 'may', 'such', 'give', 'over', 'think', 'most', 'even', 'find', 'day', 'also', 'after', 'way', 'many', 'must', 'look', 'before', 'great', 'back', 'through', 'long', 'where', 'much', 'should', 'well', 'people', 'down', 'own', 'just', 'because', 'good', 'each', 'those', 'feel', 'seem', 'how', 'high', 'too', 'place', 'little', 'world', 'very', 'still', 'nation', 'hand', 'old', 'life', 'tell', 'write', 'become', 'here', 'show', 'house', 'both', 'between', 'need', 'mean', 'call', 'develop', 'under', 'last', 'right', 'move', 'thing', 'general', 'school', 'never', 'same', 'another', 'begin', 'while', 'number', 'part', 'turn', 'real', 'leave', 'might', 'want', 'point', 'form', 'off', 'child', 'few', 'small', 'since', 'against', 'ask', 'late', 'home', 'interest', 'large', 'person', 'end', 'open', 'public', 'follow', 'during', 'present', 'without', 'again', 'hold', 'govern', 'around', 'possible', 'head', 'consider', 'word', 'program', 'problem', 'however', 'lead', 'system', 'set', 'order', 'eye', 'plan', 'run', 'keep', 'face', 'fact', 'group', 'play', 'stand', 'increase', 'early', 'course', 'change', 'help', 'line'
-]);
-// Increse MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS if you want the language filtering to be more strict.
-const MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS: string = process.env.MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS || "7";
+// const s3 = new S3();
+// const prisma = new PrismaClient();
+// const arweave = Arweave.init({
+//     host: 'arweave.net',
+//     port: 443,
+//     protocol: 'https'
+// });
 
 
-interface EventBridgeEvent {
-    detail?: {
-        defaultTrx: string;
-    };
-}
-
-const index = async (event?: EventBridgeEvent): Promise<void> => {
-    // Create Publication if it doesn't exist.
-    let publication = await prisma.publication.findUnique({
-        where: {
-            name: PUBLICATION_NAME
-        }
-    })
-
-    if (!publication) {
-        try {
-            publication = await prisma.publication.create({
-                data: {
-                    name: PUBLICATION_NAME
-                }
-            });
-        } catch (error) {
-            console.error(`Publication ${PUBLICATION_NAME} could NOT be created`);
-            throw error;
-        }
-    }
-
-    const defaultTrx = event?.detail?.defaultTrx;
-    let syncDbUntilTrx: string;
-
-    if (!defaultTrx) {
-        const latestDBPost = await prisma.post.findFirst({
-            where: {
-                publication: {
-                    name: PUBLICATION_NAME
-                }
-            },
-            orderBy: {
-                publishedAt: 'desc'
-            }
-        });
-
-        // If there isn't a DB entry and defaultCursur param has not been given,
-        // stop function execution to avoid infinite loop.
-        if (!latestDBPost) {
-            console.info("Default Trx NOT specified. NO DB entry found. Terminating process gracefully...")
-            return;
-        }
-
-        syncDbUntilTrx = latestDBPost.trxHash;
-    } else {
-        syncDbUntilTrx = defaultTrx;
-    }
-
-    console.info(`Latest DB trxHash is: ${syncDbUntilTrx}`);
-
-    // We need to get the latest Arweave Data first to have the cursor from which we
-    // start syncing our DB, until the syncDbUntilTrx.
-    const arweaveGraphQlData: any = await getArweaveGraphQlData();
-
-    let latestArweaveCursor: string = arweaveGraphQlData[0].cursor;
-    const latestArweaveTrxHash: string = arweaveGraphQlData[0].node.id;
-
-    // Make sure we haven't been given an entry that's already in the DB
-    // This avoids an infinite loop.
-    const isEntryAlreadyInDB = await prisma.post.findUnique({
-        where: {
-            trxHash: latestArweaveTrxHash,
-        },
-    });
-
-    if (isEntryAlreadyInDB) {
-        console.log(`DB already up to date for ${PUBLICATION_NAME} publication.`)
-        return;
-    }
-
-    // Gather data to be saved in DB
-    let contentInfo = await getProcessedArweaveContent(latestArweaveTrxHash);
-
-    // If content passes our minimum crypteria to be displayed, save it.
-    // Otherwise continue normal execution to find and save all non-encrypted posts.
-    if (contentInfo) {
-        contentInfo.trxHash = latestArweaveTrxHash;
-        contentInfo.cursor = latestArweaveCursor;
-        // Save Post static HTML to S3 and get URL. 
-        let postURL = await saveHTMLtoS3(contentInfo.fullContent, contentInfo.trxHash);
-        contentInfo.fullContentS3URL = postURL;
-
-        // Even if one Trx is problematic and we can't save it, we still try to save the rest.
-        try {
-            await saveToDB(contentInfo);
-        } catch (error) {
-            console.log(`Not able to save latest arweave post to DB. Trying to save the rest of the transactions... ERROR: ${error}`);
-        }
-    }
-
-    let dbSynced = false;
-    while (!dbSynced) {
-        let arweaveTrxBatch = await getArweaveGraphQlData(latestArweaveCursor);
-        console.log(`-------------------- New Arweave Batch Of Transactions --------------------`);
+// const S3_BUCKET_NAME = process.env.S3_BUCKET_NAME || "digest-posts-html";
+// const GRAPHQL_ARWEAVE_ENDPOINT = process.env.GRAPHQL_ARWEAVE_ENDPOINT || "https://arweave-search.goldsky.com/graphql";
+// const PUBLICATION_NAME = "Paragraph";
+// const TAGS = [{ name: "AppName", values: ["Paragraph"] }];
+// const MOST_COMMON_ENGLISH_WORDS = new Set([
+//     'the', 'be', 'of', 'and', 'a', 'to', 'in', 'he', 'have', 'it', 'that', 'for', 'they', 'I', 'with', 'as', 'not', 'on', 'she', 'at', 'by', 'this', 'we', 'you', 'do', 'but', 'from', 'or', 'which', 'one', 'would', 'all', 'will', 'there', 'say', 'who', 'make', 'when', 'can', 'more', 'if', 'no', 'man', 'out', 'other', 'so', 'what', 'time', 'up', 'go', 'about', 'than', 'into', 'could', 'state', 'only', 'new', 'year', 'some', 'take', 'come', 'these', 'know', 'see', 'use', 'get', 'like', 'then', 'first', 'any', 'work', 'now', 'may', 'such', 'give', 'over', 'think', 'most', 'even', 'find', 'day', 'also', 'after', 'way', 'many', 'must', 'look', 'before', 'great', 'back', 'through', 'long', 'where', 'much', 'should', 'well', 'people', 'down', 'own', 'just', 'because', 'good', 'each', 'those', 'feel', 'seem', 'how', 'high', 'too', 'place', 'little', 'world', 'very', 'still', 'nation', 'hand', 'old', 'life', 'tell', 'write', 'become', 'here', 'show', 'house', 'both', 'between', 'need', 'mean', 'call', 'develop', 'under', 'last', 'right', 'move', 'thing', 'general', 'school', 'never', 'same', 'another', 'begin', 'while', 'number', 'part', 'turn', 'real', 'leave', 'might', 'want', 'point', 'form', 'off', 'child', 'few', 'small', 'since', 'against', 'ask', 'late', 'home', 'interest', 'large', 'person', 'end', 'open', 'public', 'follow', 'during', 'present', 'without', 'again', 'hold', 'govern', 'around', 'possible', 'head', 'consider', 'word', 'program', 'problem', 'however', 'lead', 'system', 'set', 'order', 'eye', 'plan', 'run', 'keep', 'face', 'fact', 'group', 'play', 'stand', 'increase', 'early', 'course', 'change', 'help', 'line'
+// ]);
+// // Increse MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS if you want the language filtering to be more strict.
+// const MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS: string = process.env.MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS || "7";
 
 
-        for (const transaction of arweaveTrxBatch) {
-            // Break loop if we reached the latest DB transaction.
-            if (transaction.node.id === syncDbUntilTrx) {
-                dbSynced = true;
-                break;
-            }
+// interface EventBridgeEvent {
+//     detail?: {
+//         defaultTrx: string;
+//     };
+// }
 
-            // Update latest Cursor to this transaction
-            latestArweaveCursor = transaction.cursor;
+// const index = async (event?: EventBridgeEvent): Promise<void> => {
+//     // Create Publication if it doesn't exist.
+//     let publication = await prisma.publication.findUnique({
+//         where: {
+//             name: PUBLICATION_NAME
+//         }
+//     })
 
-            contentInfo = await getProcessedArweaveContent(transaction.node.id);
+//     if (!publication) {
+//         try {
+//             publication = await prisma.publication.create({
+//                 data: {
+//                     name: PUBLICATION_NAME
+//                 }
+//             });
+//         } catch (error) {
+//             console.error(`Publication ${PUBLICATION_NAME} could NOT be created`);
+//             throw error;
+//         }
+//     }
 
-            // Skip this transaction if it doesn't meet out minimum criteria.
-            if (!contentInfo) continue;
+//     const defaultTrx = event?.detail?.defaultTrx;
+//     let syncDbUntilTrx: string;
 
-            contentInfo.trxHash = transaction.node.id;
-            contentInfo.cursor = transaction.cursor;
-            let postURL = await saveHTMLtoS3(contentInfo.fullContent, contentInfo.trxHash);
-            contentInfo.fullContentS3URL = postURL;
+//     if (!defaultTrx) {
+//         const latestDBPost = await prisma.post.findFirst({
+//             where: {
+//                 publication: {
+//                     name: PUBLICATION_NAME
+//                 }
+//             },
+//             orderBy: {
+//                 publishedAt: 'desc'
+//             }
+//         });
 
-            try {
-                await saveToDB(contentInfo);
-            } catch (error) {
-                // Even if one Trx is problematic and we can't save it, we still try to save the rest.
-                console.log(`Not able to save latest arweave post to DB. Trying to save the rest of the transactions... ERROR: ${error}`);
-            }
-        }
-    }
+//         // If there isn't a DB entry and defaultCursur param has not been given,
+//         // stop function execution to avoid infinite loop.
+//         if (!latestDBPost) {
+//             console.info("Default Trx NOT specified. NO DB entry found. Terminating process gracefully...")
+//             return;
+//         }
 
-    console.info(`DB synced to Arweave for ${PUBLICATION_NAME}`);
-}
+//         syncDbUntilTrx = latestDBPost.trxHash;
+//     } else {
+//         syncDbUntilTrx = defaultTrx;
+//     }
+
+//     console.info(`Latest DB trxHash is: ${syncDbUntilTrx}`);
+
+//     // We need to get the latest Arweave Data first to have the cursor from which we
+//     // start syncing our DB, until the syncDbUntilTrx.
+//     const arweaveGraphQlData: any = await getArweaveGraphQlData();
+
+//     let latestArweaveCursor: string = arweaveGraphQlData[0].cursor;
+//     const latestArweaveTrxHash: string = arweaveGraphQlData[0].node.id;
+
+//     // Make sure we haven't been given an entry that's already in the DB
+//     // This avoids an infinite loop.
+//     const isEntryAlreadyInDB = await prisma.post.findUnique({
+//         where: {
+//             trxHash: latestArweaveTrxHash,
+//         },
+//     });
+
+//     if (isEntryAlreadyInDB) {
+//         console.log(`DB already up to date for ${PUBLICATION_NAME} publication.`)
+//         return;
+//     }
+
+//     // Gather data to be saved in DB
+//     let contentInfo = await getProcessedArweaveContent(latestArweaveTrxHash);
+
+//     // If content passes our minimum crypteria to be displayed, save it.
+//     // Otherwise continue normal execution to find and save all non-encrypted posts.
+//     if (contentInfo) {
+//         contentInfo.trxHash = latestArweaveTrxHash;
+//         contentInfo.cursor = latestArweaveCursor;
+//         // Save Post static HTML to S3 and get URL. 
+//         let postURL = await saveHTMLtoS3(contentInfo.fullContent, contentInfo.trxHash);
+//         contentInfo.fullContentS3URL = postURL;
+
+//         // Even if one Trx is problematic and we can't save it, we still try to save the rest.
+//         try {
+//             await saveToDB(contentInfo);
+//         } catch (error) {
+//             console.log(`Not able to save latest arweave post to DB. Trying to save the rest of the transactions... ERROR: ${error}`);
+//         }
+//     }
+
+//     let dbSynced = false;
+//     while (!dbSynced) {
+//         let arweaveTrxBatch = await getArweaveGraphQlData(latestArweaveCursor);
+//         console.log(`-------------------- New Arweave Batch Of Transactions --------------------`);
 
 
-async function saveHTMLtoS3(fullContent: string, trxHash: string): Promise<string> {
-    const params = {
-        Bucket: S3_BUCKET_NAME,
-        Key: trxHash,
-        Body: fullContent,
-    };
+//         for (const transaction of arweaveTrxBatch) {
+//             // Break loop if we reached the latest DB transaction.
+//             if (transaction.node.id === syncDbUntilTrx) {
+//                 dbSynced = true;
+//                 break;
+//             }
 
-    try {
-        await s3.upload(params).promise();
-    } catch (error) {
-        console.error(`Could NOT save Post ${trxHash} to S3: ${error}`);
-        throw error;
-    }
+//             // Update latest Cursor to this transaction
+//             latestArweaveCursor = transaction.cursor;
 
-    return `https://${S3_BUCKET_NAME}.s3.amazonaws.com/${trxHash}`;
-}
+//             contentInfo = await getProcessedArweaveContent(transaction.node.id);
 
-async function getArweaveGraphQlData(latestCursor?: string): Promise<Array<Record<string, any>>> {
-    if (!latestCursor) {
-        const arweaveQuery = `
-		query($tags: [TagFilter!]) {
-			transactions(tags: $tags, first: 1, sort:HEIGHT_DESC) {
-				edges {
-					cursor
-					node {
-						id
-						tags {
-							name
-							value
-						}
-					}
-				}
-			}
-		}`;
+//             // Skip this transaction if it doesn't meet out minimum criteria.
+//             if (!contentInfo) continue;
 
-        try {
-            const latestArweaveData = await axios.post(GRAPHQL_ARWEAVE_ENDPOINT, {
-                query: arweaveQuery,
-                variables: {
-                    tags: TAGS
-                }
-            });
+//             contentInfo.trxHash = transaction.node.id;
+//             contentInfo.cursor = transaction.cursor;
+//             let postURL = await saveHTMLtoS3(contentInfo.fullContent, contentInfo.trxHash);
+//             contentInfo.fullContentS3URL = postURL;
 
-            return latestArweaveData.data.data.transactions.edges;
-        } catch (error: any) {
-            console.error(`The hashes of Arweave Posts could NOT be retrieved ${error.response.data}`);
-            throw error;
-        }
-    } else {
-        const arweaveQuery = `
-		query($tags: [TagFilter!], $cursor: String!) {
-			transactions(tags: $tags, first: 10, after: $cursor, sort:HEIGHT_DESC) {
-				edges {
-					cursor
-					node {
-						id
-					}
-				}
-			}
-		}`
+//             try {
+//                 await saveToDB(contentInfo);
+//             } catch (error) {
+//                 // Even if one Trx is problematic and we can't save it, we still try to save the rest.
+//                 console.log(`Not able to save latest arweave post to DB. Trying to save the rest of the transactions... ERROR: ${error}`);
+//             }
+//         }
+//     }
 
-        try {
-            const latestArweaveData = await axios.post(GRAPHQL_ARWEAVE_ENDPOINT, {
-                query: arweaveQuery,
-                variables: {
-                    tags: TAGS,
-                    cursor: latestCursor
-                }
-            });
+//     console.info(`DB synced to Arweave for ${PUBLICATION_NAME}`);
+// }
 
-            return latestArweaveData.data.data.transactions.edges;
-        } catch (error: any) {
-            console.error(`The hashes of Arweave Posts could NOT be retrieved ${error.response.data}`);
-            throw error;
-        }
-    }
-}
 
-async function getProcessedArweaveContent(latestArweaveTrxHash: string): Promise<Record<string, any> | null> {
-    let arweaveContent;
-    try {
-        const arweaveContentString = await arweave.transactions.getData(latestArweaveTrxHash, { decode: true, string: true })
-        arweaveContent = JSON.parse(arweaveContentString);
-    } catch (error) {
-        console.error(`Unable to retrieve content data from Arweave SDK for TrxHash: ${latestArweaveTrxHash}: ${error}`)
-        throw error;
-    }
+// async function saveHTMLtoS3(fullContent: string, trxHash: string): Promise<string> {
+//     const params = {
+//         Bucket: S3_BUCKET_NAME,
+//         Key: trxHash,
+//         Body: fullContent,
+//     };
 
-    // If the content is encrypted, skip it. Encrypted Trx do NOT have spaces.
-    if (!arweaveContent.markdown.includes(" ")) {
-        console.info(`Trx ${latestArweaveTrxHash} NOT saved because it is encrypted`);
-        return null;
-    }
-    // If content is NOT longer than 300 chars, it's not worth displaying.
-    if (arweaveContent.markdown.length < 300) {
-        console.info(`Trx ${latestArweaveTrxHash} NOT saved because content is shorter than 300 chars`);
-        return null;
-    }
+//     try {
+//         await s3.upload(params).promise();
+//     } catch (error) {
+//         console.error(`Could NOT save Post ${trxHash} to S3: ${error}`);
+//         throw error;
+//     }
 
-    // Get Published Time
-    const unixTimestamp = arweaveContent.publishedAt; // Unix timestamp in seconds
-    const date = new Date(unixTimestamp); // Convert Unix timestamp to milliseconds
-    const formattedDate = new Date(date.toUTCString());
+//     return `https://${S3_BUCKET_NAME}.s3.amazonaws.com/${trxHash}`;
+// }
 
-    // Get processed content snippet
-    const rawArweavePostContent = processStaticHTML(arweaveContent.staticHtml.substring(0, 5000), true);
-    const processedPostContent = rawArweavePostContent.replace(/<[^>]+>/g, '').substring(0, 597) + '...';
-    // If content is NOT english, skip it.
-    if (!checkEnglishLanguage(processedPostContent, parseInt(MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS))) {
-        console.info(`Trx ${latestArweaveTrxHash} NOT saved because language is NOT english`);
-        return null;
-    }
+// async function getArweaveGraphQlData(latestCursor?: string): Promise<Array<Record<string, any>>> {
+//     if (!latestCursor) {
+//         const arweaveQuery = `
+// 		query($tags: [TagFilter!]) {
+// 			transactions(tags: $tags, first: 1, sort:HEIGHT_DESC) {
+// 				edges {
+// 					cursor
+// 					node {
+// 						id
+// 						tags {
+// 							name
+// 							value
+// 						}
+// 					}
+// 				}
+// 			}
+// 		}`;
 
-    // Get title
-    const title = arweaveContent.title;
+//         try {
+//             const latestArweaveData = await axios.post(GRAPHQL_ARWEAVE_ENDPOINT, {
+//                 query: arweaveQuery,
+//                 variables: {
+//                     tags: TAGS
+//                 }
+//             });
 
-    // Get processed content body.
-    // Taking the static HTML from the getData() response and cleaning it.
-    const processedContentBody = processStaticHTML(arweaveContent.staticHtml);
+//             return latestArweaveData.data.data.transactions.edges;
+//         } catch (error: any) {
+//             console.error(`The hashes of Arweave Posts could NOT be retrieved ${error.response.data}`);
+//             throw error;
+//         }
+//     } else {
+//         const arweaveQuery = `
+// 		query($tags: [TagFilter!], $cursor: String!) {
+// 			transactions(tags: $tags, first: 10, after: $cursor, sort:HEIGHT_DESC) {
+// 				edges {
+// 					cursor
+// 					node {
+// 						id
+// 					}
+// 				}
+// 			}
+// 		}`
 
-    // Get authors for Post metadata
-    const authors = arweaveContent.authors;
+//         try {
+//             const latestArweaveData = await axios.post(GRAPHQL_ARWEAVE_ENDPOINT, {
+//                 query: arweaveQuery,
+//                 variables: {
+//                     tags: TAGS,
+//                     cursor: latestCursor
+//                 }
+//             });
 
-    const contentInfo = {
-        publishedAt: formattedDate,
-        title: title,
-        contentSnippet: processedPostContent,
-        fullContent: processedContentBody,
-        metadata: {
-            authors: authors
-        }
-    };
+//             return latestArweaveData.data.data.transactions.edges;
+//         } catch (error: any) {
+//             console.error(`The hashes of Arweave Posts could NOT be retrieved ${error.response.data}`);
+//             throw error;
+//         }
+//     }
+// }
 
-    return contentInfo;
-}
+// async function getProcessedArweaveContent(latestArweaveTrxHash: string): Promise<Record<string, any> | null> {
+//     let arweaveContent;
+//     try {
+//         const arweaveContentString = await arweave.transactions.getData(latestArweaveTrxHash, { decode: true, string: true })
+//         arweaveContent = JSON.parse(arweaveContentString);
+//     } catch (error) {
+//         console.error(`Unable to retrieve content data from Arweave SDK for TrxHash: ${latestArweaveTrxHash}: ${error}`)
+//         throw error;
+//     }
 
-/**
- * Checks if a given text contains a minimum number of UNIQUE English words.
- * @param textToCheck The text to check for English language.
- * @param minimum_number_qunique_english_words The minimum number of unique English words required in the text.
- * @returns A boolean indicating whether the text contains the minimum number of unique English words.
- */
-function checkEnglishLanguage(textToCheck: string, minimum_number_qunique_english_words: number): boolean {
-    let counter = 0;
-    const wordsInText = textToCheck.split(/\W+/);
-    // const mostCommonEnglishWordsReplicated: Set<String> = MOST_COMMON_ENGLISH_WORDS;
+//     // If the content is encrypted, skip it. Encrypted Trx do NOT have spaces.
+//     if (!arweaveContent.markdown.includes(" ")) {
+//         console.info(`Trx ${latestArweaveTrxHash} NOT saved because it is encrypted`);
+//         return null;
+//     }
+//     // If content is NOT longer than 300 chars, it's not worth displaying.
+//     if (arweaveContent.markdown.length < 300) {
+//         console.info(`Trx ${latestArweaveTrxHash} NOT saved because content is shorter than 300 chars`);
+//         return null;
+//     }
 
-    for (const word of wordsInText) {
-        if (counter === minimum_number_qunique_english_words) return true;
+//     // Get Published Time
+//     const unixTimestamp = arweaveContent.publishedAt; // Unix timestamp in seconds
+//     const date = new Date(unixTimestamp); // Convert Unix timestamp to milliseconds
+//     const formattedDate = new Date(date.toUTCString());
 
-        if (MOST_COMMON_ENGLISH_WORDS.has(word.toLowerCase())) {
-            counter++;
-        }
+//     // Get processed content snippet
+//     const rawArweavePostContent = processStaticHTML(arweaveContent.staticHtml.substring(0, 5000), true);
+//     const processedPostContent = rawArweavePostContent.replace(/<[^>]+>/g, '').substring(0, 597) + '...';
+//     // If content is NOT english, skip it.
+//     if (!checkEnglishLanguage(processedPostContent, parseInt(MINIMUM_NUMBER_UNIQUE_ENGLISH_WORDS))) {
+//         console.info(`Trx ${latestArweaveTrxHash} NOT saved because language is NOT english`);
+//         return null;
+//     }
 
-        // if (mostCommonEnglishWordsReplicated.has(word.toLowerCase())) {
-        //     mostCommonEnglishWordsReplicated.delete(word.toLowerCase());
-        //     counter++;
-        // }
-    }
+//     // Get title
+//     const title = arweaveContent.title;
 
-    return false;
-}
+//     // Get processed content body.
+//     // Taking the static HTML from the getData() response and cleaning it.
+//     const processedContentBody = processStaticHTML(arweaveContent.staticHtml);
 
-function processStaticHTML(staticHTML: string, removeLinks: boolean = false): String {
-    let sanitizedHTML: string;
+//     // Get authors for Post metadata
+//     const authors = arweaveContent.authors;
 
-    // sanitize and remove links
-    if (removeLinks) {
-        sanitizedHTML = sanitizeHtml(staticHTML, {
-            allowedTags: sanitizeHtml.defaults.allowedTags.filter(tag => tag !== 'link' && tag !== 'a' && tag !== 'img')
-        });
-    } else {
-        // general sanitization
-        sanitizedHTML = sanitizeHtml(staticHTML, {
-            allowedTags: sanitizeHtml.defaults.allowedTags.concat(['img', 'a']),
-            allowedAttributes: {
-                'a': ['href', 'name', 'target'],
-                'img': ['src', 'alt']
-            }
-        });
-    }
+//     const contentInfo = {
+//         publishedAt: formattedDate,
+//         title: title,
+//         contentSnippet: processedPostContent,
+//         fullContent: processedContentBody,
+//         metadata: {
+//             authors: authors
+//         }
+//     };
 
-    return sanitizedHTML;
-}
+//     return contentInfo;
+// }
 
-async function saveToDB(data: Record<string, any>): Promise<void> {
-    const twelveHoursSincePosted = new Date((new Date(data.publishedAt.getTime() - 12 * 60 * 60 * 1000)).toUTCString());
+// /**
+//  * Checks if a given text contains a minimum number of UNIQUE English words.
+//  * @param textToCheck The text to check for English language.
+//  * @param minimum_number_qunique_english_words The minimum number of unique English words required in the text.
+//  * @returns A boolean indicating whether the text contains the minimum number of unique English words.
+//  */
+// function checkEnglishLanguage(textToCheck: string, minimum_number_qunique_english_words: number): boolean {
+//     let counter = 0;
+//     const wordsInText = textToCheck.split(/\W+/);
+//     // const mostCommonEnglishWordsReplicated: Set<String> = MOST_COMMON_ENGLISH_WORDS;
 
-    try {
-        const post = await prisma.post.findFirst({
-            where: {
-                title: data.title,
-                publishedAt: {
-                    gte: twelveHoursSincePosted
-                }
-            }
-        });
+//     for (const word of wordsInText) {
+//         if (counter === minimum_number_qunique_english_words) return true;
 
-        if (post) {
-            await prisma.post.update({
-                where: {
-                    uuid: post.uuid
-                },
-                data: {
-                    publishedAt: data.publishedAt,
-                    trxHash: data.trxHash,
-                    contentSnippet: data.contentSnippet,
-                    fullContentS3URL: data.fullContentS3URL,
-                    cursor: data.cursor,
-                    metadata: data.metadata
-                }
-            });
-        } else {
-            await prisma.post.create({
-                data: {
-                    uuid: uuidv4(),
-                    publishedAt: data.publishedAt,
-                    trxHash: data.trxHash,
-                    title: data.title,
-                    contentSnippet: data.contentSnippet,
-                    fullContentS3URL: data.fullContentS3URL,
-                    cursor: data.cursor,
-                    publicationName: PUBLICATION_NAME,
-                    metadata: data.metadata
-                }
-            })
-        }
-    } catch (error) {
-        console.error(`Unable to save Post (cursor: ${data.cursor}, trxHash: ${data.trxHash}) data to DB: ${error}`);
-        throw error;
-    }
+//         if (MOST_COMMON_ENGLISH_WORDS.has(word.toLowerCase())) {
+//             counter++;
+//         }
 
-    console.info(`Post ${data.trxHash} has been saved to DB.`);
-}
+//         // if (mostCommonEnglishWordsReplicated.has(word.toLowerCase())) {
+//         //     mostCommonEnglishWordsReplicated.delete(word.toLowerCase());
+//         //     counter++;
+//         // }
+//     }
 
-module.exports = {
-    handler: index
-};
+//     return false;
+// }
+
+// function processStaticHTML(staticHTML: string, removeLinks: boolean = false): String {
+//     let sanitizedHTML: string;
+
+//     // sanitize and remove links
+//     if (removeLinks) {
+//         sanitizedHTML = sanitizeHtml(staticHTML, {
+//             allowedTags: sanitizeHtml.defaults.allowedTags.filter(tag => tag !== 'link' && tag !== 'a' && tag !== 'img')
+//         });
+//     } else {
+//         // general sanitization
+//         sanitizedHTML = sanitizeHtml(staticHTML, {
+//             allowedTags: sanitizeHtml.defaults.allowedTags.concat(['img', 'a']),
+//             allowedAttributes: {
+//                 'a': ['href', 'name', 'target'],
+//                 'img': ['src', 'alt']
+//             }
+//         });
+//     }
+
+//     return sanitizedHTML;
+// }
+
+// async function saveToDB(data: Record<string, any>): Promise<void> {
+//     const twelveHoursSincePosted = new Date((new Date(data.publishedAt.getTime() - 12 * 60 * 60 * 1000)).toUTCString());
+
+//     try {
+//         const post = await prisma.post.findFirst({
+//             where: {
+//                 title: data.title,
+//                 publishedAt: {
+//                     gte: twelveHoursSincePosted
+//                 }
+//             }
+//         });
+
+//         if (post) {
+//             await prisma.post.update({
+//                 where: {
+//                     uuid: post.uuid
+//                 },
+//                 data: {
+//                     publishedAt: data.publishedAt,
+//                     trxHash: data.trxHash,
+//                     contentSnippet: data.contentSnippet,
+//                     fullContentS3URL: data.fullContentS3URL,
+//                     cursor: data.cursor,
+//                     metadata: data.metadata
+//                 }
+//             });
+//         } else {
+//             await prisma.post.create({
+//                 data: {
+//                     uuid: uuidv4(),
+//                     publishedAt: data.publishedAt,
+//                     trxHash: data.trxHash,
+//                     title: data.title,
+//                     contentSnippet: data.contentSnippet,
+//                     fullContentS3URL: data.fullContentS3URL,
+//                     cursor: data.cursor,
+//                     publicationName: PUBLICATION_NAME,
+//                     metadata: data.metadata
+//                 }
+//             })
+//         }
+//     } catch (error) {
+//         console.error(`Unable to save Post (cursor: ${data.cursor}, trxHash: ${data.trxHash}) data to DB: ${error}`);
+//         throw error;
+//     }
+
+//     console.info(`Post ${data.trxHash} has been saved to DB.`);
+// }
+
+// module.exports = {
+//     handler: index
+// };
+
+import { franc } from 'franc-min'
+
+
+const isEnglish = franc("Some text that I like.", { only: ["english"] });
+
+console.log(`isEnglish? ${isEnglish}`);

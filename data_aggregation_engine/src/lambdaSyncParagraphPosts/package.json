@@ -21,6 +21,7 @@
         "arweave": "^1.14.0",
         "aws-sdk": "^2.1413.0",
         "axios": "^1.4.0",
+        "franc-min": "^6.1.0",
         "prisma": "^4.16.2",
         "sanitize-html": "^2.11.0",
         "uuid": "^9.0.0"

@@ -1,14 +1,14 @@
 {
     "compilerOptions": {
         "target": "ES2020",
-        "module": "commonjs",
+        "module": "CommonJS",
+        "moduleResolution": "node",
+        "esModuleInterop": true,
         "outDir": "../../dist",
         "rootDir": "../",
         "strict": true,
-        "esModuleInterop": true,
         "skipLibCheck": true,
         "forceConsistentCasingInFileNames": true,
-        "moduleResolution": "node",
         "resolveJsonModule": true
     },
     "include": [
